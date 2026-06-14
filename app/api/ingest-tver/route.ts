@@ -6,12 +6,32 @@ import { inferGenre } from '@/lib/genre';
 // Tver から今週放送中のバラエティ番組を取得して contents に保存する。
 // content_type: 'tver' / tver_url / episode_title / broadcast_date を保存。
 // スクレイピングがブロックされた場合は Claude API の Web 検索でフォールバック。
+//
+// タイムアウト対策：
+// - 1回の実行で limit 件のみ処理（?limit=5&offset=0 で分割実行）
+// - Tver への各リクエストは5秒でタイムアウト
+// - タイムアウト時はその時点までの結果を返す
+
+export const maxDuration = 25;
 
 const MOBILE_UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
 const TVER_PLATFORM = 'https://platform-api.tver.jp';
+const REQ_TIMEOUT_MS = 5000;
+const DEFAULT_LIMIT = 5;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// タイムアウト付き fetch
+async function fetchTimeout(url: string, init: RequestInit, ms: number): Promise<Response> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms);
+  try {
+    return await fetch(url, { ...init, signal: ctrl.signal });
+  } finally {
+    clearTimeout(t);
+  }
+}
 
 type TverEpisode = {
   title: string;
@@ -23,18 +43,26 @@ type TverEpisode = {
   channelName: string;
 };
 
-// ── Tver Platform API（公開フロント API）経由で取得 ──
-async function fetchFromTverApi(): Promise<TverEpisode[]> {
-  // 1) ブラウザユーザーを作成して platform_uid / platform_token を取得
-  const createRes = await fetch(`${TVER_PLATFORM}/v2/api/platform_users/browser/create`, {
-    method: 'POST',
-    headers: {
-      'User-Agent': MOBILE_UA,
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'x-tver-platform-type': 'web',
-    },
-    body: 'device_type=pc',
-  });
+// Tver Platform API から全エピソードを取得（タイムアウト時は [] を返す）
+async function fetchAllFromTverApi(): Promise<TverEpisode[]> {
+  let createRes: Response;
+  try {
+    createRes = await fetchTimeout(
+      `${TVER_PLATFORM}/v2/api/platform_users/browser/create`,
+      {
+        method: 'POST',
+        headers: {
+          'User-Agent': MOBILE_UA,
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'x-tver-platform-type': 'web',
+        },
+        body: 'device_type=pc',
+      },
+      REQ_TIMEOUT_MS
+    );
+  } catch {
+    return [];
+  }
   if (!createRes.ok) return [];
   const createJson = await createRes.json();
   const uid = createJson?.result?.platform_uid;
@@ -43,28 +71,26 @@ async function fetchFromTverApi(): Promise<TverEpisode[]> {
 
   await sleep(2000); // アクセス間隔 2 秒
 
-  // 2) バラエティカテゴリのホームを取得
   const params = new URLSearchParams({ platform_uid: uid, platform_token: token });
-  const homeRes = await fetch(
-    `${TVER_PLATFORM}/service/api/v1/callCategoryHome/variety?${params}`,
-    {
-      headers: {
-        'User-Agent': MOBILE_UA,
-        'x-tver-platform-type': 'web',
-      },
-    }
-  );
+  let homeRes: Response;
+  try {
+    homeRes = await fetchTimeout(
+      `${TVER_PLATFORM}/service/api/v1/callCategoryHome/variety?${params}`,
+      { headers: { 'User-Agent': MOBILE_UA, 'x-tver-platform-type': 'web' } },
+      REQ_TIMEOUT_MS
+    );
+  } catch {
+    return [];
+  }
   if (!homeRes.ok) return [];
   const homeJson = await homeRes.json();
 
-  // components[].contents[].content から episode を抽出
   const episodes: TverEpisode[] = [];
   const components = homeJson?.result?.components ?? [];
   for (const comp of components) {
     for (const item of comp?.contents ?? []) {
       const c = item?.content;
-      const type = item?.type;
-      if (type !== 'episode' || !c?.id) continue;
+      if (item?.type !== 'episode' || !c?.id) continue;
       episodes.push({
         title: String(c.seriesTitle ?? c.title ?? ''),
         episodeTitle: String(c.title ?? ''),
@@ -79,26 +105,28 @@ async function fetchFromTverApi(): Promise<TverEpisode[]> {
   return episodes;
 }
 
-// ── フォールバック：Claude API の Web 検索で現在のバラエティ番組情報を取得 ──
-async function fetchFromClaudeWebSearch(): Promise<TverEpisode[]> {
+// フォールバック：Claude API の Web 検索（limit 件・リクエストタイムアウト付き）
+async function fetchFromClaudeWebSearch(limit: number): Promise<TverEpisode[]> {
   if (!process.env.ANTHROPIC_API_KEY) return [];
   const client = new Anthropic();
-
   try {
-    const response = await client.messages.create({
-      model: 'claude-opus-4-8',
-      max_tokens: 4000,
-      tools: [{ type: 'web_search_20260209', name: 'web_search' }],
-      messages: [
-        {
-          role: 'user',
-          content:
-            '今週、日本のTVerで配信中の人気バラエティ番組を10件、Web検索して調べてください。' +
-            '各番組について JSON 配列で title(番組名), episodeTitle(放送回), description(概要60字), ' +
-            'broadcastDate(放送日), channelName(放送局) を返してください。JSON以外は出力しないでください。',
-        },
-      ],
-    });
+    const response = await client.messages.create(
+      {
+        model: 'claude-opus-4-8',
+        max_tokens: 2000,
+        tools: [{ type: 'web_search_20260209', name: 'web_search' }],
+        messages: [
+          {
+            role: 'user',
+            content:
+              `今週、日本のTVerで配信中の人気バラエティ番組を${limit}件、Web検索して調べてください。` +
+              '各番組について JSON 配列で title(番組名), episodeTitle(放送回), description(概要60字), ' +
+              'broadcastDate(放送日), channelName(放送局) を返してください。JSON以外は出力しないでください。',
+          },
+        ],
+      },
+      { timeout: 20000 }
+    );
     const text = response.content
       .filter((b): b is Anthropic.TextBlock => b.type === 'text')
       .map((b) => b.text)
@@ -106,7 +134,7 @@ async function fetchFromClaudeWebSearch(): Promise<TverEpisode[]> {
     const match = text.match(/\[[\s\S]*\]/);
     if (!match) return [];
     const arr = JSON.parse(match[0]) as Record<string, string>[];
-    return arr.map((e) => ({
+    return arr.slice(0, limit).map((e) => ({
       title: String(e.title ?? ''),
       episodeTitle: String(e.episodeTitle ?? ''),
       description: String(e.description ?? '').slice(0, 500),
@@ -122,12 +150,8 @@ async function fetchFromClaudeWebSearch(): Promise<TverEpisode[]> {
 
 async function upsertEpisodes(episodes: TverEpisode[]): Promise<{ inserted: number; skipped: number }> {
   if (episodes.length === 0) return { inserted: 0, skipped: 0 };
-
   const urls = episodes.map((e) => e.tverUrl);
-  const { data: existing } = await supabase
-    .from('contents')
-    .select('tver_url')
-    .in('tver_url', urls);
+  const { data: existing } = await supabase.from('contents').select('tver_url').in('tver_url', urls);
   const existingUrls = new Set((existing ?? []).map((r) => r.tver_url));
 
   let inserted = 0;
@@ -163,26 +187,41 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  const { searchParams } = new URL(request.url);
+  const limit = Math.max(1, Math.min(20, parseInt(searchParams.get('limit') ?? String(DEFAULT_LIMIT), 10) || DEFAULT_LIMIT));
+  const offset = Math.max(0, parseInt(searchParams.get('offset') ?? '0', 10) || 0);
+
   let source = 'tver_api';
-  let episodes: TverEpisode[] = [];
+  let all: TverEpisode[] = [];
   try {
-    episodes = await fetchFromTverApi();
+    all = await fetchAllFromTverApi();
   } catch {
-    episodes = [];
+    all = [];
   }
 
-  // ブロック等で取得できなければ Claude Web 検索にフォールバック
-  if (episodes.length === 0) {
+  // Tver が取れなければ Claude Web 検索（limit 件のみ）にフォールバック
+  if (all.length === 0) {
     source = 'claude_web_search';
-    episodes = await fetchFromClaudeWebSearch();
+    all = await fetchFromClaudeWebSearch(limit);
   }
 
-  const { inserted, skipped } = await upsertEpisodes(episodes);
+  // この実行分（offset から limit 件）だけ処理
+  const slice = all.slice(offset, offset + limit);
+  const { inserted, skipped } = await upsertEpisodes(slice);
+
+  const processed = slice.length;
+  const remaining = Math.max(0, all.length - (offset + processed));
+  const nextOffset = remaining > 0 ? offset + limit : null;
 
   return NextResponse.json({
     source,
-    found: episodes.length,
+    total: all.length,
+    offset,
+    limit,
+    processed,
     inserted,
     skipped,
+    remaining,
+    nextOffset,
   });
 }

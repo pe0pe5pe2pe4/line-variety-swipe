@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import { hasValidThumbnail } from '@/lib/types';
 
+export const maxDuration = 25;
+
 // タイトルが完全一致する重複コンテンツを削除する。
 // 残す基準：サムネイル画像がある行を優先（同条件なら最初の1件）。
 // swipes から参照されている行はFK制約で削除に失敗しうるため、その場合はスキップする。

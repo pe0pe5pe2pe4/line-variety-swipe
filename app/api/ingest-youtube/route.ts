@@ -2,8 +2,22 @@ import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import { TV_CHANNELS, COMEDIAN_CHANNELS, ChannelConfig } from '@/lib/youtube-channels';
 
+export const maxDuration = 25;
+
 const YT_API = 'https://www.googleapis.com/youtube/v3';
 const VIDEOS_PER_CHANNEL = 10;
+const YT_TIMEOUT_MS = 8000;
+
+// タイムアウト付き fetch（YouTube API への各リクエストを8秒で打ち切る）
+async function ytFetch(url: string): Promise<Response> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), YT_TIMEOUT_MS);
+  try {
+    return await fetch(url, { signal: ctrl.signal });
+  } finally {
+    clearTimeout(t);
+  }
+}
 
 type VideoItem = {
   videoId: string;
@@ -28,7 +42,8 @@ async function fetchVideosByChannelId(
     maxResults: String(maxResults),
     key: apiKey,
   });
-  const res = await fetch(`${YT_API}/search?${params}`);
+  let res: Response;
+  try { res = await ytFetch(`${YT_API}/search?${params}`); } catch { return []; }
   if (!res.ok) return [];
   const data = await res.json();
   if (data.error) return [];
@@ -69,7 +84,8 @@ async function fetchVideosByChannelSearch(
     maxResults: '1',
     key: apiKey,
   });
-  const chRes = await fetch(`${YT_API}/search?${chParams}`);
+  let chRes: Response;
+  try { chRes = await ytFetch(`${YT_API}/search?${chParams}`); } catch { return []; }
   if (!chRes.ok) return [];
   const chData = await chRes.json();
   const channelId = chData.items?.[0]?.id?.channelId;
@@ -94,7 +110,8 @@ async function fetchVideosByKeyword(
     relevanceLanguage: 'ja',
     key: apiKey,
   });
-  const res = await fetch(`${YT_API}/search?${params}`);
+  let res: Response;
+  try { res = await ytFetch(`${YT_API}/search?${params}`); } catch { return []; }
   if (!res.ok) return [];
   const data = await res.json();
   if (data.error) return [];

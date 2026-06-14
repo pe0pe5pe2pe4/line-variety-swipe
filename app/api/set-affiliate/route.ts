@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 
+export const maxDuration = 25;
+
 // 対応サービス（Netflixはアフィリエイト対象外なので含めない）
 const SERVICES = ['unext', 'hulu', 'amazon'] as const;
 type Service = (typeof SERVICES)[number];

@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import { inferGenre } from '@/lib/genre';
 
+export const maxDuration = 25;
+
 type Row = {
   id: string;
   title: string;

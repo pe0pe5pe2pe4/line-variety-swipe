@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import { searchTMDBShow } from '@/lib/tmdb';
 
+export const maxDuration = 25;
+
 const WIKIPEDIA_API = 'https://ja.wikipedia.org/w/api.php';
 const BATCH = 20;
 

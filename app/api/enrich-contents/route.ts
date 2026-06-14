@@ -4,11 +4,13 @@ import { resolveGenre } from '@/lib/genre';
 import { enrichBatch } from '@/lib/claude-enricher';
 
 // enriched_description が未設定のコンテンツを Claude API で加工する。
-// コスト最適化：未加工(新規)のみ対象・1回の実行で最大20件だけ処理。
+// コスト最適化＆タイムアウト対策：未加工(新規)のみ対象・1回の実行で limit 件だけ処理。
 // 事前に: ALTER TABLE contents ADD COLUMN IF NOT EXISTS enriched_description text;
 // 認証は CRON_SECRET。
 
-const BATCH_SIZE = 20;
+export const maxDuration = 25;
+
+const DEFAULT_LIMIT = 5;
 
 export async function GET(request: Request) {
   const authHeader = request.headers.get('authorization');
@@ -21,12 +23,21 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'ANTHROPIC_API_KEY not set' }, { status: 500 });
   }
 
-  // enriched_description が空の行を最大 BATCH_SIZE 件取得
+  const { searchParams } = new URL(request.url);
+  const limit = Math.max(1, Math.min(20, parseInt(searchParams.get('limit') ?? String(DEFAULT_LIMIT), 10) || DEFAULT_LIMIT));
+
+  // 未加工の総数（残り件数の算出用）
+  const { count: totalRemaining } = await supabase
+    .from('contents')
+    .select('id', { count: 'exact', head: true })
+    .is('enriched_description', null);
+
+  // enriched_description が空の行を最大 limit 件取得
   const { data, error } = await supabase
     .from('contents')
     .select('id, title, description, channel_name, content_type, genre, enriched_description')
     .is('enriched_description', null)
-    .limit(BATCH_SIZE);
+    .limit(limit);
 
   if (error) return NextResponse.json({ error }, { status: 500 });
 
@@ -40,7 +51,7 @@ export async function GET(request: Request) {
   }[];
 
   if (rows.length === 0) {
-    return NextResponse.json({ processed: 0, updated: 0, message: '加工対象なし' });
+    return NextResponse.json({ processed: 0, updated: 0, remaining: 0, message: '加工対象なし' });
   }
 
   const inputs = rows.map((r) => ({
@@ -61,5 +72,6 @@ export async function GET(request: Request) {
     if (!upErr) updated++;
   }
 
-  return NextResponse.json({ processed: rows.length, updated });
+  const remaining = Math.max(0, (totalRemaining ?? rows.length) - updated);
+  return NextResponse.json({ processed: rows.length, updated, remaining });
 }

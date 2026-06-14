@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import { fetchTMDBLastEpisode } from '@/lib/tmdb';
 
+export const maxDuration = 25;
+
 // 事前にSupabaseで実行してください:
 // ALTER TABLE contents ADD COLUMN IF NOT EXISTS episode_number TEXT;
 // ALTER TABLE contents ADD COLUMN IF NOT EXISTS episode_title TEXT;
