@@ -12,6 +12,7 @@ export async function POST(request: Request) {
     user_id,
     content_id,
     direction,
+    created_at: new Date().toISOString(),
   });
 
   if (error) return NextResponse.json({ error }, { status: 500 });

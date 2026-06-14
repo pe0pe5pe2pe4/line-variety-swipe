@@ -1,5 +1,7 @@
 'use client';
-import { useState, useRef } from 'react';
+import { useRef } from 'react';
+import { useSpring, animated } from '@react-spring/web';
+import { useDrag } from '@use-gesture/react';
 
 type Content = {
   id: string;
@@ -12,51 +14,121 @@ type Content = {
 type Props = {
   content: Content;
   onSwipe: (direction: 'left' | 'right') => void;
+  isTop: boolean;
 };
 
-export default function SwipeCard({ content, onSwipe }: Props) {
-  const [dragging, setDragging] = useState(false);
-  const [offset, setOffset] = useState(0);
-  const startX = useRef(0);
+const SWIPE_THRESHOLD = 100;
 
-  const handleMouseDown = (e: React.MouseEvent) => {
-    setDragging(true);
-    startX.current = e.clientX;
-  };
+export default function SwipeCard({ content, onSwipe, isTop }: Props) {
+  const [{ x, rotate, opacity }, api] = useSpring(() => ({
+    x: 0,
+    rotate: 0,
+    opacity: 1,
+    config: { tension: 300, friction: 30 },
+  }));
 
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!dragging) return;
-    setOffset(e.clientX - startX.current);
-  };
+  const gone = useRef(false);
 
-  const handleMouseUp = () => {
-    setDragging(false);
-    if (offset > 100) onSwipe('right');
-    else if (offset < -100) onSwipe('left');
-    setOffset(0);
-  };
+  const bind = useDrag(
+    ({ active, movement: [mx], velocity: [vx], direction: [dx] }) => {
+      if (gone.current) return;
+
+      const trigger = Math.abs(mx) > SWIPE_THRESHOLD || Math.abs(vx) > 0.5;
+
+      if (!active && trigger) {
+        gone.current = true;
+        const dir = mx > 0 ? 1 : -1;
+        api.start({
+          x: dir * window.innerWidth * 1.5,
+          rotate: dir * 30,
+          opacity: 0,
+          onRest: () => onSwipe(dir > 0 ? 'right' : 'left'),
+        });
+      } else if (!active) {
+        api.start({ x: 0, rotate: 0, opacity: 1 });
+      } else {
+        api.start({
+          x: mx,
+          rotate: mx / 15,
+          opacity: 1,
+          immediate: true,
+        });
+      }
+    },
+    { filterTaps: true, pointer: { touch: true } }
+  );
+
+  const likeOpacity = x.to((v) => Math.max(0, Math.min(1, v / SWIPE_THRESHOLD)));
+  const nopeOpacity = x.to((v) => Math.max(0, Math.min(1, -v / SWIPE_THRESHOLD)));
 
   return (
-    <div
-      onMouseDown={handleMouseDown}
-      onMouseMove={handleMouseMove}
-      onMouseUp={handleMouseUp}
-      style={{ transform: `translateX(${offset}px) rotate(${offset * 0.05}deg)` }}
-      className="absolute w-80 bg-white rounded-2xl shadow-xl overflow-hidden cursor-grab select-none transition-transform"
+    <animated.div
+      {...(isTop ? bind() : {})}
+      style={{
+        x,
+        rotate,
+        opacity,
+        touchAction: 'none',
+        position: 'absolute',
+        inset: 0,
+        cursor: isTop ? 'grab' : 'default',
+        userSelect: 'none',
+      }}
+      className="will-change-transform"
     >
-      <img 
-  src={content.thumbnail_url || 'https://placehold.co/320x256?text=No+Image'} 
-  alt={content.title} 
-  className="w-full h-64 object-cover" 
-/>
-      <div className="p-4">
-        <h2 className="text-xl font-bold">{content.title}</h2>
-        <p className="text-sm text-gray-500 mt-1 line-clamp-3">{content.description}</p>
+      <div className="w-full h-full bg-white rounded-3xl shadow-2xl overflow-hidden flex flex-col">
+        {/* Image */}
+        <div className="relative flex-shrink-0 h-[60%] bg-gray-100">
+          <img
+            src={content.thumbnail_url || 'https://placehold.co/400x300/1a1a2e/ffffff?text=No+Image'}
+            alt={content.title}
+            className="w-full h-full object-cover"
+            draggable={false}
+          />
+          {/* Gradient overlay */}
+          <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+
+          {/* LIKE badge */}
+          <animated.div
+            style={{ opacity: likeOpacity }}
+            className="absolute top-6 left-6 border-4 border-emerald-400 text-emerald-400 font-black text-3xl px-3 py-1 rounded-xl rotate-[-20deg] tracking-widest"
+          >
+            LIKE
+          </animated.div>
+
+          {/* NOPE badge */}
+          <animated.div
+            style={{ opacity: nopeOpacity }}
+            className="absolute top-6 right-6 border-4 border-rose-400 text-rose-400 font-black text-3xl px-3 py-1 rounded-xl rotate-[20deg] tracking-widest"
+          >
+            NOPE
+          </animated.div>
+        </div>
+
+        {/* Info */}
+        <div className="flex flex-col flex-1 p-5 gap-2">
+          <h2 className="text-xl font-bold text-gray-900 leading-tight line-clamp-2">{content.title}</h2>
+          <p className="text-sm text-gray-500 line-clamp-3 flex-1">{content.description}</p>
+
+          {/* Action buttons */}
+          <div className="flex justify-center gap-8 pt-2">
+            <button
+              onPointerDown={(e) => { e.stopPropagation(); onSwipe('left'); }}
+              className="w-14 h-14 flex items-center justify-center rounded-full border-2 border-rose-300 text-rose-400 text-2xl shadow-md hover:bg-rose-50 active:scale-95 transition-all"
+              aria-label="Skip"
+            >
+              ✕
+            </button>
+            <button
+              onPointerDown={(e) => { e.stopPropagation(); onSwipe('right'); }}
+              className="w-14 h-14 flex items-center justify-center rounded-full border-2 border-emerald-300 text-emerald-500 text-2xl shadow-md hover:bg-emerald-50 active:scale-95 transition-all"
+              aria-label="Like"
+            >
+              ♥
+            </button>
+          </div>
+        </div>
       </div>
-      <div className="flex justify-between px-6 py-3">
-        <button onClick={() => onSwipe('left')} className="text-red-400 text-3xl">✕</button>
-        <button onClick={() => onSwipe('right')} className="text-green-400 text-3xl">♥</button>
-      </div>
-    </div>
+    </animated.div>
   );
 }
