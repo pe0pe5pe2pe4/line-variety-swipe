@@ -8,6 +8,7 @@ export type Content = {
   vod_affiliate_url: string;
   content_type?: ContentType;
   youtube_url?: string;
+  channel_name?: string;
 };
 
 export function getThumbnailSrc(url: string | undefined | null): string {

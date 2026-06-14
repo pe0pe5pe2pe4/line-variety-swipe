@@ -16,7 +16,7 @@ export default function Onboarding({ onComplete }: Props) {
   const [swiped, setSwiped] = useState(0);
 
   useEffect(() => {
-    fetch('/api/contents?user_id=onboarding')
+    fetch('/api/recommend?user_id=onboarding')
       .then((r) => r.json())
       .then((data) => {
         const items = Array.isArray(data) ? data.slice(0, ONBOARDING_COUNT) : [];

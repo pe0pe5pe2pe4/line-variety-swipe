@@ -28,7 +28,7 @@ export default function Home() {
 
   useEffect(() => {
     if (!onboardingDone) return;
-    fetch(`/api/contents?user_id=${DUMMY_USER_ID}`)
+    fetch(`/api/recommend?user_id=${DUMMY_USER_ID}`)
       .then((r) => r.json())
       .then((data) => {
         setContents(Array.isArray(data) ? data : []);

@@ -56,6 +56,9 @@ export default function DetailModal({ content, onClose }: Props) {
           {/* Info */}
           <div className="px-5 py-4">
             <h2 className="text-xl font-bold text-gray-900 leading-tight">{content.title}</h2>
+            {content.channel_name && (
+              <p className="text-xs text-slate-400 mt-1">{content.channel_name}</p>
+            )}
             {content.description ? (
               <p className="text-sm text-gray-500 mt-2 leading-relaxed">{content.description}</p>
             ) : null}
