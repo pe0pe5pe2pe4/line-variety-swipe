@@ -55,7 +55,10 @@ export async function POST(request: Request) {
     created_at: new Date().toISOString(),
   });
 
-  if (error) return NextResponse.json({ error }, { status: 500 });
+  // 23505 = unique_violation（同一コンテンツの再スワイプ）は既に記録済みなので成功扱い
+  if (error && error.code !== '23505') {
+    return NextResponse.json({ error }, { status: 500 });
+  }
 
   return NextResponse.json({ success: true });
 }

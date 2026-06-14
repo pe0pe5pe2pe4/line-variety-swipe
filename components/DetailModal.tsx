@@ -1,5 +1,6 @@
 'use client';
-import { Content, getThumbnailSrc } from '@/lib/types';
+import { Content } from '@/lib/types';
+import ContentImage from './ContentImage';
 
 type Props = {
   content: Content | null;
@@ -10,7 +11,6 @@ export default function DetailModal({ content, onClose }: Props) {
   if (!content) return null;
 
   const isYoutube = content.content_type === 'youtube';
-  const thumbnailSrc = getThumbnailSrc(content.thumbnail_url);
 
   // ① TVer（常に表示）
   const tverUrl = `https://tver.jp/search/#${encodeURIComponent(content.title)}`;
@@ -50,10 +50,11 @@ export default function DetailModal({ content, onClose }: Props) {
         <div className="overflow-y-auto" style={{ maxHeight: 'calc(85dvh - 24px)' }}>
           {/* Thumbnail */}
           <div className="relative h-48 bg-gray-100 mx-4 mt-2 rounded-2xl overflow-hidden">
-            <img
-              src={thumbnailSrc}
+            <ContentImage
+              src={content.thumbnail_url}
               alt={content.title}
-              className="w-full h-full object-cover"
+              channelName={content.channel_name}
+              eager
             />
             {isYoutube && (
               <div className="absolute inset-0 flex items-center justify-center">

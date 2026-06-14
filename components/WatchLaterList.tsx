@@ -1,5 +1,6 @@
 'use client';
-import { Content, getThumbnailSrc } from '@/lib/types';
+import { Content } from '@/lib/types';
+import ContentImage from './ContentImage';
 
 type Props = {
   items: Content[];
@@ -20,7 +21,6 @@ export default function WatchLaterList({ items, onShowDetail }: Props) {
   return (
     <div className="w-full max-w-sm mx-auto px-4 pb-4">
       {items.map((item) => {
-        const thumb = getThumbnailSrc(item.thumbnail_url);
         const isYoutube = item.content_type === 'youtube';
 
         return (
@@ -31,11 +31,11 @@ export default function WatchLaterList({ items, onShowDetail }: Props) {
           >
             {/* Thumbnail */}
             <div className="relative w-16 h-20 flex-shrink-0 rounded-xl overflow-hidden bg-slate-700">
-              <img
-                src={thumb}
+              <ContentImage
+                src={item.thumbnail_url}
                 alt={item.title}
-                className="w-full h-full object-cover"
-                loading="lazy"
+                channelName={item.channel_name}
+                sizes="64px"
               />
               {isYoutube && (
                 <div className="absolute inset-0 flex items-center justify-center bg-black/30">

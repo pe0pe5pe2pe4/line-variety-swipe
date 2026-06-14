@@ -9,6 +9,10 @@ import { Content } from '@/lib/types';
 const DUMMY_USER_ID = 'test-user-001';
 const ONBOARDING_KEY = 'onboarding_done';
 const PRELOAD_COUNT = 3;
+// 残りがこの枚数以下になったら自動で追加取得（無限スワイプ）
+const LOW_WATERMARK = 6;
+// exclude クエリに載せる直近表示IDの上限（URL肥大を防ぐ）
+const EXCLUDE_LIMIT = 200;
 
 type Tab = 'swipe' | 'watchlater';
 
@@ -22,6 +26,49 @@ export default function Home() {
   const [modalContent, setModalContent] = useState<Content | null>(null);
   const [watchLater, setWatchLater] = useState<Content[]>([]);
   const [watchLaterLoading, setWatchLaterLoading] = useState(false);
+  // これ以上取得できる番組が無くなったか（空状態の表示判定に使用）
+  const [reachedEnd, setReachedEnd] = useState(false);
+
+  // 無限スワイプ用：これまで表示したIDを記録し、追加取得時に除外する
+  const seenSet = useRef<Set<string>>(new Set());
+  const seenOrder = useRef<string[]>([]);
+  const loadingMore = useRef(false);
+  const exhausted = useRef(false);
+
+  const markSeen = (id: string) => {
+    if (seenSet.current.has(id)) return;
+    seenSet.current.add(id);
+    seenOrder.current.push(id);
+  };
+
+  // 追加取得（initial=true で初回ロード）
+  const loadMore = async (uid: string, initial = false) => {
+    if (loadingMore.current) return;
+    if (exhausted.current && !initial) return;
+    loadingMore.current = true;
+    if (initial) setLoading(true);
+    try {
+      const exclude = seenOrder.current.slice(-EXCLUDE_LIMIT).join(',');
+      const res = await fetch(
+        `/api/recommend?user_id=${encodeURIComponent(uid)}&exclude=${encodeURIComponent(exclude)}`
+      );
+      const data = await res.json();
+      const items: Content[] = Array.isArray(data) ? data : [];
+      // 既出を除外して重複表示を防ぐ
+      const fresh = items.filter((c) => c?.id && !seenSet.current.has(c.id));
+      fresh.forEach((c) => markSeen(c.id));
+      if (fresh.length === 0) {
+        exhausted.current = true;
+        setReachedEnd(true);
+      }
+      setContents((prev) => (initial ? fresh : [...prev, ...fresh]));
+    } catch {
+      // ネットワークエラー時は何もしない（次のスワイプで再試行される）
+    } finally {
+      loadingMore.current = false;
+      if (initial) setLoading(false);
+    }
+  };
 
   // ── TASK 2: LIFF 初期化 ──────────────────────────────────
   useEffect(() => {
@@ -69,45 +116,41 @@ export default function Home() {
     setOnboardingDone(done);
   }, []);
 
-  // コンテンツ取得（userId と onboardingDone 両方が揃ってから）
+  // コンテンツ取得（userId と onboardingDone 両方が揃ってから・初回のみ）
   useEffect(() => {
     if (!userId || !onboardingDone) return;
-    setLoading(true);
-    fetch(`/api/recommend?user_id=${userId}`)
-      .then((r) => r.json())
-      .then((data) => {
-        setContents(Array.isArray(data) ? data : []);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
+    loadMore(userId, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, onboardingDone]);
 
   // あとで見るリストをロード（タブ切替時）
+  // 楽観的に追加済みのローカル項目はサーバー結果とマージして消えないようにする
   useEffect(() => {
     if (activeTab !== 'watchlater' || !userId) return;
     setWatchLaterLoading(true);
-    fetch(`/api/swipes?user_id=${userId}`)
+    fetch(`/api/watchlist?user_id=${userId}`)
       .then((r) => r.json())
       .then((data) => {
-        setWatchLater(Array.isArray(data) ? data : []);
+        const serverItems: Content[] = Array.isArray(data) ? data : [];
+        setWatchLater((prev) => {
+          const serverIds = new Set(serverItems.map((c) => c.id));
+          const localOnly = prev.filter((c) => !serverIds.has(c.id));
+          return [...localOnly, ...serverItems];
+        });
         setWatchLaterLoading(false);
       })
       .catch(() => setWatchLaterLoading(false));
   }, [activeTab, userId]);
 
-  // プリロード済み画像をrefで保持（GC防止）
-  const preloadCache = useRef<Map<string, HTMLImageElement>>(new Map());
-  useEffect(() => {
-    contents.forEach((c) => {
-      if (!c.thumbnail_url || preloadCache.current.has(c.thumbnail_url)) return;
-      const img = new Image();
-      img.src = c.thumbnail_url;
-      preloadCache.current.set(c.thumbnail_url, img);
-    });
-  }, [contents]);
-
   const handleSwipe = (direction: 'left' | 'right' | 'up', content: Content) => {
-    setContents((prev) => prev.filter((c) => c.id !== content.id));
+    setContents((prev) => {
+      const next = prev.filter((c) => c.id !== content.id);
+      // 残りが少なくなったら自動で追加取得（無限スワイプ）
+      if (userId && next.length <= LOW_WATERMARK) {
+        loadMore(userId);
+      }
+      return next;
+    });
 
     if (direction === 'up') {
       if (content.content_type === 'youtube' && content.youtube_url) {
@@ -168,11 +211,18 @@ export default function Home() {
                 <p className="text-slate-400 text-sm">読み込み中...</p>
               </div>
             ) : contents.length === 0 ? (
-              <div className="flex flex-col items-center gap-3 text-center px-8">
-                <span className="text-6xl">🎉</span>
-                <p className="text-white text-xl font-bold">すべてチェックしました！</p>
-                <p className="text-slate-400 text-sm">また後で来てください</p>
-              </div>
+              reachedEnd ? (
+                <div className="flex flex-col items-center gap-3 text-center px-8">
+                  <span className="text-6xl">🎉</span>
+                  <p className="text-white text-xl font-bold">すべてチェックしました！</p>
+                  <p className="text-slate-400 text-sm">また後で来てください</p>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center gap-4">
+                  <div className="w-12 h-12 rounded-full border-4 border-indigo-400 border-t-transparent animate-spin" />
+                  <p className="text-slate-400 text-sm">読み込み中...</p>
+                </div>
+              )
             ) : (
               <>
                 <div className="w-full max-w-sm mb-4 text-center">
