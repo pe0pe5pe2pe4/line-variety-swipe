@@ -4,7 +4,7 @@ import SwipeCard from '@/components/SwipeCard';
 import Onboarding from '@/components/Onboarding';
 import DetailModal from '@/components/DetailModal';
 import WatchLaterList from '@/components/WatchLaterList';
-import MyPage, { Stats } from '@/components/MyPage';
+import MyPage, { Stats, ReferralInfo } from '@/components/MyPage';
 import SkeletonCard from '@/components/SkeletonCard';
 import PushPrompt from '@/components/PushPrompt';
 import InstallBanner from '@/components/InstallBanner';
@@ -53,6 +53,7 @@ export default function Home() {
   const [watchLaterLoading, setWatchLaterLoading] = useState(false);
   const [stats, setStats] = useState<Stats | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
+  const [referral, setReferral] = useState<ReferralInfo | null>(null);
   // これ以上取得できる番組が無くなったか（空状態の表示判定に使用）
   const [reachedEnd, setReachedEnd] = useState(false);
   // 取得に失敗したか（再試行ボタンの表示判定）
@@ -117,6 +118,11 @@ export default function Home() {
   useEffect(() => {
     async function initUser() {
       const liffId = process.env.NEXT_PUBLIC_LIFF_ID;
+      // 招待コード（?ref=XXXXXX）を取得
+      const ref =
+        typeof window !== 'undefined'
+          ? new URLSearchParams(window.location.search).get('ref')
+          : null;
 
       // LIFF_ID が未設定 or 'dummy' → 開発用フォールバック
       if (!liffId || liffId === 'dummy') {
@@ -131,7 +137,7 @@ export default function Home() {
         if (profile) {
           setUserId(profile.userId);
 
-          // usersテーブルに upsert（fire-and-forget）
+          // usersテーブルに upsert（fire-and-forget・招待コードを渡す）
           fetch('/api/users', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -139,6 +145,7 @@ export default function Home() {
               line_user_id: profile.userId,
               display_name: profile.displayName,
               picture_url: profile.pictureUrl ?? null,
+              referred_by: ref,
             }),
           }).catch(() => {});
         }
@@ -196,6 +203,11 @@ export default function Home() {
         setStatsLoading(false);
       })
       .catch(() => setStatsLoading(false));
+    // 招待情報
+    fetch(`/api/referral?user_id=${userId}`)
+      .then((r) => r.json())
+      .then((data) => setReferral(data && !data.error ? (data as ReferralInfo) : null))
+      .catch(() => setReferral(null));
   }, [activeTab, userId]);
 
   const handleSwipe = (direction: 'left' | 'right' | 'up', content: Content) => {
@@ -373,7 +385,7 @@ export default function Home() {
               <h1 className="text-white text-2xl font-black tracking-tight">マイページ</h1>
               <p className="text-slate-400 text-xs mt-1">あなたのスワイプ統計</p>
             </div>
-            <MyPage stats={stats} loading={statsLoading} />
+            <MyPage stats={stats} referral={referral} loading={statsLoading} />
           </div>
         )}
       </main>

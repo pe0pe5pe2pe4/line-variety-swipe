@@ -20,10 +20,43 @@ export type Stats = {
   tastePercentile?: { genre: string; topPercent: number } | null;
 };
 
+export type ReferralInfo = {
+  referral_code: string | null;
+  invite_url: string | null;
+  invited_count: number;
+  invited_right_swipes: number;
+  bonus_swipes: number;
+};
+
 type Props = {
   stats: Stats | null;
+  referral?: ReferralInfo | null;
   loading: boolean;
 };
+
+function InviteSection({ referral }: { referral: ReferralInfo }) {
+  const copy = () => {
+    if (!referral.invite_url) return;
+    navigator.clipboard?.writeText(referral.invite_url).catch(() => {});
+  };
+  return (
+    <div className="bg-gradient-to-br from-pink-500/30 to-rose-700/20 rounded-2xl p-4">
+      <h2 className="text-white font-bold text-sm">👯 友達を招待</h2>
+      <p className="text-white text-2xl font-black mt-1">招待した友達：{referral.invited_count}人</p>
+      {referral.bonus_swipes > 0 && (
+        <p className="text-rose-200 text-xs mt-1">ボーナススワイプ +{referral.bonus_swipes}</p>
+      )}
+      {referral.invite_url && (
+        <button
+          onClick={copy}
+          className="mt-3 w-full py-2.5 bg-white/90 text-rose-600 rounded-full font-bold text-sm active:scale-95 transition-transform"
+        >
+          招待リンクをコピー
+        </button>
+      )}
+    </div>
+  );
+}
 
 function RankingList({
   title,
@@ -67,7 +100,7 @@ function RankingList({
   );
 }
 
-export default function MyPage({ stats, loading }: Props) {
+export default function MyPage({ stats, referral, loading }: Props) {
   if (loading) {
     return (
       <div className="flex justify-center mt-10">
@@ -86,6 +119,9 @@ export default function MyPage({ stats, loading }: Props) {
 
   return (
     <div className="w-full max-w-sm mx-auto px-4 pb-4 flex flex-col gap-4">
+      {/* 友達招待 */}
+      {referral && <InviteSection referral={referral} />}
+
       {/* 好み傾向 */}
       {stats.tastePercentile && (
         <div className="bg-gradient-to-br from-purple-500/30 to-indigo-700/20 rounded-2xl p-4 text-center">
