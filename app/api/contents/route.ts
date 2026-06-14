@@ -9,7 +9,6 @@ type ContentRow = {
   vod_affiliate_url: string;
 };
 
-// 日本語ストップワード（助詞・助動詞など）
 const STOP_WORDS = new Set([
   'の','は','が','を','に','で','と','も','な','た','て','い','る','し',
   'こ','そ','あ','さ','れ','か','う','よ','ん','だ','や','ら','ま','す',
@@ -39,6 +38,21 @@ function scoreContent(c: ContentRow, freq: Record<string, number>): number {
   return words.reduce((sum, w) => sum + (freq[w] ?? 0), 0);
 }
 
+// 好みスコアを重みにしつつランダム性を加えるシャッフル
+// スコアが高いほど上位に出やすいが、毎回順番が変わる
+function weightedShuffle(items: (ContentRow & { _score: number })[]): ContentRow[] {
+  const maxScore = Math.max(...items.map((i) => i._score), 1);
+  return items
+    .map((item) => ({
+      item,
+      // スコア(0〜1正規化) × 0.7 + ランダム(0〜1) × 0.3
+      // → 好みスコアを優先しつつ毎回異なる順番になる
+      sortKey: (item._score / maxScore) * 0.7 + Math.random() * 0.3,
+    }))
+    .sort((a, b) => b.sortKey - a.sortKey)
+    .map(({ item: { _score: _s, ...c } }) => c as ContentRow);
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const userId = searchParams.get('user_id');
@@ -47,7 +61,6 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'user_id required' }, { status: 400 });
   }
 
-  // スワイプ済みID + 右スワイプIDを同時取得
   const { data: allSwipes } = await supabase
     .from('swipes')
     .select('content_id, direction')
@@ -58,8 +71,8 @@ export async function GET(request: Request) {
     ?.filter((s: any) => s.direction === 'right')
     .map((s: any) => s.content_id) ?? [];
 
-  // 未スワイプのコンテンツを最大50件取得（スコアリング用に多めに）
-  let query = supabase.from('contents').select('*').limit(50);
+  // 未スワイプを最大100件取得してスコアリング後に10件返す
+  let query = supabase.from('contents').select('*').limit(100);
   if (swipedIds.length > 0) {
     query = query.not('id', 'in', `(${swipedIds.join(',')})`);
   }
@@ -69,12 +82,12 @@ export async function GET(request: Request) {
 
   const list = (candidates ?? []) as ContentRow[];
 
-  // 右スワイプがなければそのまま10件返す
+  // 右スワイプ履歴がなければ純粋なランダム順で返す
   if (likedIds.length === 0) {
-    return NextResponse.json(list.slice(0, 10));
+    const shuffled = [...list].sort(() => Math.random() - 0.5).slice(0, 10);
+    return NextResponse.json(shuffled);
   }
 
-  // 右スワイプしたコンテンツの内容を取得してキーワード頻度マップを構築
   const { data: likedContents } = await supabase
     .from('contents')
     .select('title, description')
@@ -84,12 +97,8 @@ export async function GET(request: Request) {
     (likedContents ?? []) as { title: string; description: string }[]
   );
 
-  // スコアリング → 降順ソート → 上位10件
-  const ranked = list
-    .map((c) => ({ ...c, _score: scoreContent(c, freqMap) }))
-    .sort((a, b) => b._score - a._score)
-    .slice(0, 10)
-    .map(({ _score, ...c }) => c);
+  const scored = list.map((c) => ({ ...c, _score: scoreContent(c, freqMap) }));
+  const result = weightedShuffle(scored).slice(0, 10);
 
-  return NextResponse.json(ranked);
+  return NextResponse.json(result);
 }
