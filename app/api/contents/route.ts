@@ -1,6 +1,44 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 
+type ContentRow = {
+  id: string;
+  title: string;
+  description: string;
+  thumbnail_url: string;
+  vod_affiliate_url: string;
+};
+
+// 日本語ストップワード（助詞・助動詞など）
+const STOP_WORDS = new Set([
+  'の','は','が','を','に','で','と','も','な','た','て','い','る','し',
+  'こ','そ','あ','さ','れ','か','う','よ','ん','だ','や','ら','ま','す',
+  'せ','く','ない','から','まで','より','など','ため','こと','もの',
+]);
+
+function extractKeywords(text: string): string[] {
+  return text
+    .split(/[\s　、。・！？「」『』【】\n\r]+/)
+    .map((w) => w.trim())
+    .filter((w) => w.length >= 2 && !STOP_WORDS.has(w));
+}
+
+function buildFreqMap(contents: { title: string; description: string }[]): Record<string, number> {
+  const freq: Record<string, number> = {};
+  for (const c of contents) {
+    const words = extractKeywords(`${c.title} ${c.description ?? ''}`);
+    for (const w of words) {
+      freq[w] = (freq[w] ?? 0) + 1;
+    }
+  }
+  return freq;
+}
+
+function scoreContent(c: ContentRow, freq: Record<string, number>): number {
+  const words = extractKeywords(`${c.title} ${c.description ?? ''}`);
+  return words.reduce((sum, w) => sum + (freq[w] ?? 0), 0);
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const userId = searchParams.get('user_id');
@@ -9,22 +47,49 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'user_id required' }, { status: 400 });
   }
 
-  const { data: swiped } = await supabase
+  // スワイプ済みID + 右スワイプIDを同時取得
+  const { data: allSwipes } = await supabase
     .from('swipes')
-    .select('content_id')
+    .select('content_id, direction')
     .eq('user_id', userId);
 
-    const swipedIds: string[] = swiped?.map((s: any) => s.content_id) ?? [];
+  const swipedIds: string[] = allSwipes?.map((s: any) => s.content_id) ?? [];
+  const likedIds: string[] = allSwipes
+    ?.filter((s: any) => s.direction === 'right')
+    .map((s: any) => s.content_id) ?? [];
 
-  let query = supabase.from('contents').select('*').limit(10);
-
+  // 未スワイプのコンテンツを最大50件取得（スコアリング用に多めに）
+  let query = supabase.from('contents').select('*').limit(50);
   if (swipedIds.length > 0) {
     query = query.not('id', 'in', `(${swipedIds.join(',')})`);
   }
 
-  const { data, error } = await query;
-
+  const { data: candidates, error } = await query;
   if (error) return NextResponse.json({ error }, { status: 500 });
 
-  return NextResponse.json(data);
+  const list = (candidates ?? []) as ContentRow[];
+
+  // 右スワイプがなければそのまま10件返す
+  if (likedIds.length === 0) {
+    return NextResponse.json(list.slice(0, 10));
+  }
+
+  // 右スワイプしたコンテンツの内容を取得してキーワード頻度マップを構築
+  const { data: likedContents } = await supabase
+    .from('contents')
+    .select('title, description')
+    .in('id', likedIds);
+
+  const freqMap = buildFreqMap(
+    (likedContents ?? []) as { title: string; description: string }[]
+  );
+
+  // スコアリング → 降順ソート → 上位10件
+  const ranked = list
+    .map((c) => ({ ...c, _score: scoreContent(c, freqMap) }))
+    .sort((a, b) => b._score - a._score)
+    .slice(0, 10)
+    .map(({ _score, ...c }) => c);
+
+  return NextResponse.json(ranked);
 }

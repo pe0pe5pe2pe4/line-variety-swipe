@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import SwipeCard from '@/components/SwipeCard';
 import Onboarding from '@/components/Onboarding';
 
@@ -36,22 +36,28 @@ export default function Home() {
       .catch(() => setLoading(false));
   }, [onboardingDone]);
 
-  // Preload images for upcoming cards
+  // プリロード済み画像をrefで保持（GC防止）
+  const preloadCache = useRef<Map<string, HTMLImageElement>>(new Map());
+
   useEffect(() => {
-    contents.slice(1, PRELOAD_COUNT + 1).forEach((c) => {
-      if (c.thumbnail_url) {
-        const img = new Image();
-        img.src = c.thumbnail_url;
-      }
+    contents.forEach((c) => {
+      if (!c.thumbnail_url || preloadCache.current.has(c.thumbnail_url)) return;
+      const img = new Image();
+      img.src = c.thumbnail_url;
+      preloadCache.current.set(c.thumbnail_url, img);
     });
   }, [contents]);
 
-  const handleSwipe = async (direction: 'left' | 'right', content: Content) => {
+  const handleSwipe = (direction: 'left' | 'right', content: Content) => {
+    // カードを即座に削除してちらつきを防ぐ
+    setContents((prev) => prev.filter((c) => c.id !== content.id));
+
     if (direction === 'right' && content.vod_affiliate_url) {
       window.open(content.vod_affiliate_url, '_blank');
     }
 
-    await fetch('/api/swipes', {
+    // スワイプログはバックグラウンドで保存（awaitしない）
+    fetch('/api/swipes', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -59,9 +65,7 @@ export default function Home() {
         content_id: content.id,
         direction,
       }),
-    });
-
-    setContents((prev) => prev.filter((c) => c.id !== content.id));
+    }).catch(() => {});
   };
 
   // Wait for localStorage check
@@ -109,8 +113,11 @@ export default function Home() {
       <div className="relative w-full max-w-sm" style={{ height: '520px' }}>
         {visibleCards.map((content, i) => {
           const isTop = i === 0;
-          const scale = 1 - (visibleCards.length - 1 - i) * 0.04;
-          const translateY = (visibleCards.length - 1 - i) * 8;
+          // i=0(top): scale=1.0, y=0, zIndex=10
+          // i=1(2nd): scale=0.96, y=12px, zIndex=9
+          // i=2(3rd): scale=0.92, y=24px, zIndex=8
+          const scale = 1 - i * 0.04;
+          const translateY = i * 12;
 
           return (
             <div
@@ -119,8 +126,8 @@ export default function Home() {
                 position: 'absolute',
                 inset: 0,
                 transform: `scale(${scale}) translateY(${translateY}px)`,
-                zIndex: isTop ? 10 : i,
-                transition: 'transform 0.2s ease',
+                zIndex: 10 - i,
+                transition: 'transform 0.3s ease',
               }}
             >
               <SwipeCard

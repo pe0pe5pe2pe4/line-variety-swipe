@@ -100,8 +100,8 @@ export default function Onboarding({ onComplete }: Props) {
         <div className="relative w-full max-w-sm" style={{ height: '520px' }}>
           {visibleCards.map((content, i) => {
             const isTop = i === 0;
-            const scale = 1 - (visibleCards.length - 1 - i) * 0.04;
-            const translateY = (visibleCards.length - 1 - i) * 8;
+            const scale = 1 - i * 0.04;
+            const translateY = i * 12;
 
             return (
               <div
@@ -110,8 +110,8 @@ export default function Onboarding({ onComplete }: Props) {
                   position: 'absolute',
                   inset: 0,
                   transform: `scale(${scale}) translateY(${translateY}px)`,
-                  zIndex: isTop ? 10 : i,
-                  transition: 'transform 0.2s ease',
+                  zIndex: 10 - i,
+                  transition: 'transform 0.3s ease',
                 }}
               >
                 <SwipeCard

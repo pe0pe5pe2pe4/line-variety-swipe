@@ -84,6 +84,8 @@ export default function SwipeCard({ content, onSwipe, isTop }: Props) {
             alt={content.title}
             className="w-full h-full object-cover"
             draggable={false}
+            loading="eager"
+            fetchPriority={isTop ? 'high' : 'low'}
           />
           {/* Gradient overlay */}
           <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
