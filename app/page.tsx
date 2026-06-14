@@ -14,10 +14,30 @@ import { fetchWithRetry } from '@/lib/fetch-retry';
 const DUMMY_USER_ID = 'test-user-001';
 const ONBOARDING_KEY = 'onboarding_done';
 const PRELOAD_COUNT = 3;
-// 残りがこの枚数以下になったら自動で追加取得（無限スワイプ）
+// 残りがこの枚数以下になったら自動で追加取得（無限スワイプ・プリフェッチ）
 const LOW_WATERMARK = 6;
 // exclude クエリに載せる直近表示IDの上限（URL肥大を防ぐ）
 const EXCLUDE_LIMIT = 200;
+
+// ── スワイプ済みIDの永続化（リロードしても履歴が消えないように localStorage 保存）──
+const swipedKey = (uid: string) => `swiped_ids_${uid}`;
+function loadSwipedIds(uid: string): string[] {
+  try {
+    const raw = localStorage.getItem(swipedKey(uid));
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
+function saveSwipedIds(uid: string, ids: string[]) {
+  try {
+    // 直近1000件まで保持
+    localStorage.setItem(swipedKey(uid), JSON.stringify(ids.slice(-1000)));
+  } catch {
+    // ストレージ不可時は無視
+  }
+}
 
 type Tab = 'swipe' | 'watchlater' | 'mypage';
 
@@ -43,12 +63,23 @@ export default function Home() {
   const seenOrder = useRef<string[]>([]);
   const loadingMore = useRef(false);
   const exhausted = useRef(false);
+  // localStorage に保存するスワイプ済みID
+  const swipedIds = useRef<string[]>([]);
 
   const markSeen = (id: string) => {
     if (seenSet.current.has(id)) return;
     seenSet.current.add(id);
     seenOrder.current.push(id);
   };
+
+  // 起動時に localStorage からスワイプ済みIDを読み込み、除外対象に反映する（バグ1）
+  useEffect(() => {
+    if (!userId) return;
+    const stored = loadSwipedIds(userId);
+    swipedIds.current = stored;
+    stored.forEach(markSeen);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
 
   // 追加取得（initial=true で初回ロード）
   const loadMore = async (uid: string, initial = false) => {
@@ -178,14 +209,14 @@ export default function Home() {
     });
 
     if (direction === 'up') {
-      // 遷移先優先度: youtube → YouTube再生 / tver → Tver直接 /
-      // それ以外(tv_show) → 無料コンテンツの多い ABEMA 検索にフォールバック
+      // 上スワイプの遷移先（厳密制御・ABEMAには絶対に飛ばない / バグ5）
+      // youtube → youtube_url / tver → tver_url / tv_show・未設定 → Tver検索
       if (content.content_type === 'youtube' && content.youtube_url) {
         window.open(content.youtube_url, '_blank');
       } else if (content.content_type === 'tver' && content.tver_url) {
         window.open(content.tver_url, '_blank');
       } else {
-        window.open(`https://abema.tv/search?q=${encodeURIComponent(content.title)}`, '_blank');
+        window.open(`https://tver.jp/search/#${encodeURIComponent(content.title)}`, '_blank');
       }
     }
 
@@ -194,6 +225,12 @@ export default function Home() {
     }
 
     if (userId) {
+      // スワイプ済みを localStorage に永続化（バグ1）
+      markSeen(content.id);
+      if (!swipedIds.current.includes(content.id)) {
+        swipedIds.current.push(content.id);
+        saveSwipedIds(userId, swipedIds.current);
+      }
       fetch('/api/swipes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

@@ -73,11 +73,46 @@ export async function GET(request: Request) {
     }
   }
 
+  // ── YouTube: 同一チャンネルから10件以上ある場合は5件に絞る（バグ3）──
+  let ytTrimmed = 0;
+  try {
+    const { data: yt } = await supabase
+      .from('contents')
+      .select('id, channel_name, thumbnail_url')
+      .eq('content_type', 'youtube');
+    type YtRow = { id: string; channel_name: string | null; thumbnail_url: string | null };
+    const byChannel = new Map<string, YtRow[]>();
+    for (const r of (yt ?? []) as YtRow[]) {
+      const ch = (r.channel_name ?? '').trim();
+      if (!ch) continue;
+      const arr = byChannel.get(ch) ?? [];
+      arr.push(r);
+      byChannel.set(ch, arr);
+    }
+    const ytDelete: string[] = [];
+    for (const rows of byChannel.values()) {
+      if (rows.length < 10) continue;
+      // サムネのある行を優先して5件残す
+      const sorted = [...rows].sort(
+        (a, b) => Number(hasValidThumbnail(b.thumbnail_url)) - Number(hasValidThumbnail(a.thumbnail_url))
+      );
+      for (const r of sorted.slice(5)) ytDelete.push(r.id);
+    }
+    for (let i = 0; i < ytDelete.length; i += chunkSize) {
+      const chunk = ytDelete.slice(i, i + chunkSize);
+      const { error } = await supabase.from('contents').delete().in('id', chunk);
+      if (!error) ytTrimmed += chunk.length;
+    }
+  } catch {
+    // 失敗しても致命的ではない
+  }
+
   return NextResponse.json({
     totalRows: all.length,
     duplicateGroups: [...groups.values()].filter((g) => g.length > 1).length,
     candidates: toDelete.length,
     deleted,
     skipped,
+    ytTrimmed,
   });
 }

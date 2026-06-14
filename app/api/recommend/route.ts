@@ -59,6 +59,7 @@ type Profile = {
   dislikedGenres: Record<string, number>; // 左スワイプしたジャンル → 表示頻度を下げる
   topGenre?: string;
   topStation?: string;
+  cooldownGenre?: string; // 直近に偏ったジャンル → 一時的に下げる
 };
 
 const W_GENRE = 3;
@@ -111,6 +112,8 @@ function scoreWithProfile(c: Content, p: Profile): number {
   score += W_KEYWORD * words.reduce((sum, w) => sum + (p.keywordFreq[w] ?? 0), 0);
   // 左スワイプと同ジャンルは頻度を下げる
   score -= PENALTY_DISLIKED_GENRE * (p.dislikedGenres[genre] ?? 0);
+  // 直近に偏ったジャンルは強めに下げて別ジャンルを優先させる（バグ2）
+  if (p.cooldownGenre && genre === p.cooldownGenre) score -= 5;
   return score;
 }
 
@@ -313,7 +316,8 @@ async function fetchYouTubeVideos(
     });
   }
 
-  return results;
+  // 同一チャンネルは最大3件まで（バグ3）
+  return capPerChannel(results, 3);
 }
 
 // ───────────────────────────────────────────────
@@ -337,7 +341,24 @@ async function fetchStoredYouTubeVideos(
 
   const { data } = await query;
   const list = dedupeByTitle((data ?? []) as Content[], swipedTitles);
-  return shuffle(list).slice(0, count);
+  // 同一チャンネルは1セッション最大3件まで（バグ3）
+  return capPerChannel(shuffle(list), 3).slice(0, count);
+}
+
+// 同一 channel_name のコンテンツを最大 n 件に制限する
+function capPerChannel(list: Content[], n: number): Content[] {
+  const counts = new Map<string, number>();
+  const out: Content[] = [];
+  for (const c of list) {
+    const ch = (c.channel_name ?? '').trim();
+    if (ch) {
+      const cur = counts.get(ch) ?? 0;
+      if (cur >= n) continue;
+      counts.set(ch, cur + 1);
+    }
+    out.push(c);
+  }
+  return out;
 }
 
 // ───────────────────────────────────────────────
@@ -378,32 +399,60 @@ function shuffle<T>(arr: T[]): T[] {
   return a;
 }
 
+// 隣接させたくない（同ジャンル or 同チャンネル）か判定
+function sameBucket(a: Content, b: Content): boolean {
+  if (!a || !b) return false;
+  if (resolveGenre(a) === resolveGenre(b)) return true;
+  const ca = (a.channel_name ?? '').trim();
+  const cb = (b.channel_name ?? '').trim();
+  return !!ca && ca === cb;
+}
+
 /**
- * TV番組とYouTube動画を指定比率で混在させる。
- * ランダムな位置に YouTube を挿入して返す。
+ * TV/Tver と YouTube を多様性を保ちつつ混在させる（バグ2・3）。
+ * - YouTube は3枠に1回（index%3===2）、2連続にしない
+ * - 同ジャンル・同チャンネルが連続しないよう並べ替える
  */
 function mixContent(tvShows: Content[], ytVideos: Content[]): Content[] {
-  if (ytVideos.length === 0) return tvShows;
-  if (tvShows.length === 0) return ytVideos;
+  if (ytVideos.length === 0) return diversify(tvShows);
+  if (tvShows.length === 0) return ytVideos; // youtube は capPerChannel 済み
 
-  const total = tvShows.length + ytVideos.length;
-  const ytPositions = new Set<number>();
-
-  // YouTube の挿入位置をランダムに決定
-  const positions = shuffle([...Array(total).keys()]);
-  for (let i = 0; i < ytVideos.length && i < positions.length; i++) {
-    ytPositions.add(positions[i]);
-  }
-
-  const result: Content[] = new Array(total);
-  let tvIdx = 0, ytIdx = 0;
-  for (let i = 0; i < total; i++) {
-    if (ytPositions.has(i) && ytIdx < ytVideos.length) {
-      result[i] = ytVideos[ytIdx++];
-    } else if (tvIdx < tvShows.length) {
-      result[i] = tvShows[tvIdx++];
+  const result: Content[] = [];
+  let ti = 0, yi = 0, i = 0;
+  while (ti < tvShows.length || yi < ytVideos.length) {
+    const prevIsYt = result[result.length - 1]?.content_type === 'youtube';
+    const wantYt = i % 3 === 2 && yi < ytVideos.length && !prevIsYt;
+    if (wantYt) {
+      result.push(ytVideos[yi++]);
+    } else if (ti < tvShows.length) {
+      result.push(tvShows[ti++]);
+    } else if (yi < ytVideos.length && !prevIsYt) {
+      result.push(ytVideos[yi++]);
     } else {
-      result[i] = ytVideos[ytIdx++];
+      break;
+    }
+    i++;
+  }
+  return diversify(result);
+}
+
+// 同ジャンル/同チャンネルの連続を、後ろの異なる要素と入れ替えて緩和する
+function diversify(list: Content[]): Content[] {
+  const result = [...list];
+  for (let k = 1; k < result.length; k++) {
+    if (!sameBucket(result[k - 1], result[k])) continue;
+    for (let m = k + 1; m < result.length; m++) {
+      const okPrev = !sameBucket(result[k - 1], result[m]);
+      const okNext = k + 1 >= result.length || !sameBucket(result[m], result[k + 1]);
+      // YouTube2連続を作らない
+      const ytSafe =
+        result[m].content_type !== 'youtube' ||
+        (result[k - 1].content_type !== 'youtube' &&
+          (k + 1 >= result.length || result[k + 1].content_type !== 'youtube'));
+      if (okPrev && okNext && ytSafe) {
+        [result[k], result[m]] = [result[m], result[k]];
+        break;
+      }
     }
   }
   return result;
@@ -463,8 +512,9 @@ export async function GET(request: Request) {
   // ── STEP 1: スワイプ履歴取得 ──
   const { data: allSwipes } = await supabase
     .from('swipes')
-    .select('content_id, direction')
-    .eq('user_id', userId);
+    .select('content_id, direction, created_at')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false });
 
   const swipedIdSet = new Set<string>([
     ...(allSwipes ?? []).map((s) => s.content_id as string),
@@ -476,21 +526,39 @@ export async function GET(request: Request) {
   const rightSwipeCount = rightSwipes.length;
   const rightSwipeIds = rightSwipes.map((s) => s.content_id as string);
   const leftSwipeIds = leftSwipes.map((s) => s.content_id as string);
+  // 直近10件のスワイプ（created_at 降順）
+  const recentSwipeIds = (allSwipes ?? []).slice(0, 10).map((s) => s.content_id as string);
 
   // ── STEP 2: スワイプ済みタイトル & 嗜好プロファイル構築 ──
   // スワイプ済みタイトルを集約し、DBに重複行があっても再表示されないようにする
   const swipedTitles = new Set<string>();
+  const idGenre = new Map<string, string>();
   let keywords: string[] = [];
   let profile: Profile = buildProfile([], []);
 
   if (swipedIds.length > 0) {
     const { data: swipedContents } = await supabase
       .from('contents')
-      .select('id, title')
+      .select('id, title, description, channel_name, content_type, genre')
       .in('id', swipedIds);
     for (const c of swipedContents ?? []) {
       const key = (c.title ?? '').trim().toLowerCase();
       if (key) swipedTitles.add(key);
+      idGenre.set(c.id as string, resolveGenre(c as LikedRow & { id: string }));
+    }
+  }
+
+  // 直近10件で先頭から同じジャンルが3件以上続いていたら、そのジャンルをクールダウン
+  let cooldownGenre: string | undefined;
+  if (recentSwipeIds.length >= 3) {
+    const first = idGenre.get(recentSwipeIds[0]);
+    if (first) {
+      let streak = 0;
+      for (const id of recentSwipeIds) {
+        if (idGenre.get(id) === first) streak++;
+        else break;
+      }
+      if (streak >= 3) cooldownGenre = first;
     }
   }
 
@@ -510,6 +578,7 @@ export async function GET(request: Request) {
     profile = buildProfile(likedContents, dislikedContents);
     keywords = extractSearchKeywords(likedContents);
   }
+  profile.cooldownGenre = cooldownGenre;
 
   // ── STEP 3: 混在比率を決定（2段階パーソナライズ）──
   let tvRatio: number;
@@ -522,7 +591,7 @@ export async function GET(request: Request) {
   }
 
   // 1コールあたりの返却数を増やし、20回で止まる問題を解消（残り少で追加取得＝無限スワイプ）
-  const TOTAL = 20;
+  const TOTAL = 30;
   const tvCount = Math.round(TOTAL * tvRatio);
   const ytCount = TOTAL - tvCount;
 
