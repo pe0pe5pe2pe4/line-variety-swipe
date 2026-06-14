@@ -33,37 +33,57 @@ function buildPrompt(input: EnrichInput): string {
 紹介文のみを出力してください（前置き・引用符なし）。`;
 }
 
-/** 1件を加工。失敗時は null（呼び出し側で元説明にフォールバック）。 */
+/** 1件を加工。失敗時は例外を投げる（呼び出し側でログ・error収集する）。 */
 export async function enrichOne(input: EnrichInput): Promise<string | null> {
   const client = getClient();
-  if (!client) return null;
+  if (!client) throw new Error('ANTHROPIC_API_KEY not set');
 
-  try {
-    const response = await client.messages.create({
-      model: 'claude-opus-4-8',
-      max_tokens: 256,
-      messages: [{ role: 'user', content: buildPrompt(input) }],
-    });
-    const text = response.content
-      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-      .map((b) => b.text)
-      .join('')
-      .trim();
-    // 80文字上限を念のためクライアント側でも担保
-    return text ? text.slice(0, 80) : null;
-  } catch {
+  const response = await client.messages.create({
+    model: 'claude-opus-4-8',
+    max_tokens: 256,
+    messages: [{ role: 'user', content: buildPrompt(input) }],
+  });
+
+  // 安全分類によるリフューザル（Opus系では稀だが念のため）
+  if (response.stop_reason === 'refusal') {
+    throw new Error('refused by safety classifier');
+  }
+
+  const text = response.content
+    .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+    .map((b) => b.text)
+    .join('')
+    .trim();
+
+  if (!text) {
+    console.warn('[enrich] empty text, stop_reason=', response.stop_reason);
     return null;
   }
+  // 80文字上限を念のためクライアント側でも担保
+  return text.slice(0, 80);
 }
 
-/** 複数件を順次加工（レート制御のため直列）。 */
-export async function enrichBatch(
-  inputs: (EnrichInput & { id: string })[]
-): Promise<{ id: string; enriched: string }[]> {
-  const out: { id: string; enriched: string }[] = [];
+export type EnrichResult = {
+  results: { id: string; enriched: string }[];
+  errors: { id: string; error: string }[];
+};
+
+/** 複数件を順次加工（レート制御のため直列）。エラーは収集して返す。 */
+export async function enrichBatch(inputs: (EnrichInput & { id: string })[]): Promise<EnrichResult> {
+  const results: { id: string; enriched: string }[] = [];
+  const errors: { id: string; error: string }[] = [];
   for (const input of inputs) {
-    const enriched = await enrichOne(input);
-    if (enriched) out.push({ id: input.id, enriched });
+    try {
+      const enriched = await enrichOne(input);
+      if (enriched) results.push({ id: input.id, enriched });
+      else errors.push({ id: input.id, error: 'empty response' });
+    } catch (e) {
+      // Anthropic SDK のエラーは status/message を持つ
+      const err = e as { status?: number; message?: string };
+      const msg = err.status ? `${err.status}: ${err.message ?? ''}` : err.message ?? String(e);
+      console.error('[enrich] failed for', input.id, msg);
+      errors.push({ id: input.id, error: msg });
+    }
   }
-  return out;
+  return { results, errors };
 }

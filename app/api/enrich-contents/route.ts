@@ -61,17 +61,31 @@ export async function GET(request: Request) {
     genre: resolveGenre(r),
   }));
 
-  const results = await enrichBatch(inputs);
+  console.log('[enrich-contents] start', { count: inputs.length, hasApiKey: !!process.env.ANTHROPIC_API_KEY });
+
+  const { results, errors } = await enrichBatch(inputs);
 
   let updated = 0;
+  const updateErrors: string[] = [];
   for (const { id, enriched } of results) {
     const { error: upErr } = await supabase
       .from('contents')
       .update({ enriched_description: enriched })
       .eq('id', id);
     if (!upErr) updated++;
+    else if (updateErrors.length < 5) updateErrors.push(`${id}: ${upErr.message}`);
   }
 
+  console.log('[enrich-contents] done', { processed: rows.length, updated, claudeErrors: errors.length, updateErrors: updateErrors.length });
+
   const remaining = Math.max(0, (totalRemaining ?? rows.length) - updated);
-  return NextResponse.json({ processed: rows.length, updated, remaining });
+  return NextResponse.json({
+    processed: rows.length,
+    updated,
+    remaining,
+    hasApiKey: !!process.env.ANTHROPIC_API_KEY,
+    // Claude 呼び出しのエラー詳細（先頭5件）。updated:0 の原因調査用。
+    claudeErrors: errors.slice(0, 5),
+    updateErrors,
+  });
 }

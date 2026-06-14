@@ -148,17 +148,34 @@ async function fetchFromClaudeWebSearch(limit: number): Promise<TverEpisode[]> {
   }
 }
 
-async function upsertEpisodes(episodes: TverEpisode[]): Promise<{ inserted: number; skipped: number }> {
-  if (episodes.length === 0) return { inserted: 0, skipped: 0 };
+type UpsertResult = {
+  inserted: number;
+  skippedExisting: number;
+  skippedNoTitle: number;
+  insertErrors: string[];
+};
+
+async function upsertEpisodes(episodes: TverEpisode[]): Promise<UpsertResult> {
+  const res: UpsertResult = { inserted: 0, skippedExisting: 0, skippedNoTitle: 0, insertErrors: [] };
+  if (episodes.length === 0) return res;
+
+  // 重複チェックは tver_url かつ content_type='tver' に限定する。
+  // → tv_show と同名でも tver_url が異なれば別レコードとして保存される（タイトル一致では弾かない）。
   const urls = episodes.map((e) => e.tverUrl);
-  const { data: existing } = await supabase.from('contents').select('tver_url').in('tver_url', urls);
+  const { data: existing } = await supabase
+    .from('contents')
+    .select('tver_url')
+    .eq('content_type', 'tver')
+    .in('tver_url', urls);
   const existingUrls = new Set((existing ?? []).map((r) => r.tver_url));
 
-  let inserted = 0;
-  let skipped = 0;
   for (const ep of episodes) {
-    if (!ep.title || existingUrls.has(ep.tverUrl)) {
-      skipped++;
+    if (!ep.title) {
+      res.skippedNoTitle++;
+      continue;
+    }
+    if (existingUrls.has(ep.tverUrl)) {
+      res.skippedExisting++;
       continue;
     }
     const { error } = await supabase.from('contents').insert({
@@ -174,10 +191,14 @@ async function upsertEpisodes(episodes: TverEpisode[]): Promise<{ inserted: numb
       source: 'tver',
       vod_affiliate_url: '',
     });
-    if (error) skipped++;
-    else inserted++;
+    if (error) {
+      console.error('[ingest-tver] insert error', ep.title, error);
+      if (res.insertErrors.length < 5) res.insertErrors.push(`${ep.title}: ${error.message}`);
+    } else {
+      res.inserted++;
+    }
   }
-  return { inserted, skipped };
+  return res;
 }
 
 export async function GET(request: Request) {
@@ -207,11 +228,13 @@ export async function GET(request: Request) {
 
   // この実行分（offset から limit 件）だけ処理
   const slice = all.slice(offset, offset + limit);
-  const { inserted, skipped } = await upsertEpisodes(slice);
+  const up = await upsertEpisodes(slice);
 
   const processed = slice.length;
   const remaining = Math.max(0, all.length - (offset + processed));
   const nextOffset = remaining > 0 ? offset + limit : null;
+
+  console.log('[ingest-tver] done', { source, total: all.length, processed, inserted: up.inserted, insertErrors: up.insertErrors.length });
 
   return NextResponse.json({
     source,
@@ -219,8 +242,12 @@ export async function GET(request: Request) {
     offset,
     limit,
     processed,
-    inserted,
-    skipped,
+    inserted: up.inserted,
+    skipped: up.skippedExisting + up.skippedNoTitle,
+    skippedExisting: up.skippedExisting,
+    skippedNoTitle: up.skippedNoTitle,
+    // insert 失敗の詳細（先頭5件）。inserted:0 の原因調査用（列不足・制約違反など）。
+    insertErrors: up.insertErrors,
     remaining,
     nextOffset,
   });
