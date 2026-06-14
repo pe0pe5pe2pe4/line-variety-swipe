@@ -40,16 +40,16 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  // thumbnail_urlが空の番組を取得
+  // thumbnail_urlが空・null・プレースホルダー（placehold.co）の番組を取得
   const { data: targets, error } = await supabase
     .from('contents')
     .select('id, title')
-    .or('thumbnail_url.is.null,thumbnail_url.eq.')
+    .or('thumbnail_url.is.null,thumbnail_url.eq.,thumbnail_url.ilike.%placehold.co%')
     .limit(BATCH);
 
   if (error) return NextResponse.json({ error }, { status: 500 });
   if (!targets || targets.length === 0) {
-    return NextResponse.json({ message: '空の画像なし・すべて解決済み', fixed: 0 });
+    return NextResponse.json({ message: '修正対象なし・すべて解決済み', fixed: 0 });
   }
 
   let fixed = 0;
@@ -90,7 +90,7 @@ export async function GET(request: Request) {
   const remaining = await supabase
     .from('contents')
     .select('id', { count: 'exact', head: true })
-    .or('thumbnail_url.is.null,thumbnail_url.eq.');
+    .or('thumbnail_url.is.null,thumbnail_url.eq.,thumbnail_url.ilike.%placehold.co%');
 
   return NextResponse.json({
     fixed,
