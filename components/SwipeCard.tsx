@@ -80,7 +80,13 @@ export default function SwipeCard({ content, onSwipe, isTop }: Props) {
         {/* Image */}
         <div className="relative flex-shrink-0 h-[60%] bg-gray-100">
           <img
-            src={content.thumbnail_url || 'https://placehold.co/400x300/1a1a2e/ffffff?text=No+Image'}
+            src={
+              content.thumbnail_url &&
+              content.thumbnail_url !== 'not_found' &&
+              !content.thumbnail_url.includes('placehold.co')
+                ? content.thumbnail_url
+                : 'https://placehold.co/400x600/1a1a2e/ffffff?text=No+Image'
+            }
             alt={content.title}
             className="w-full h-full object-cover"
             draggable={false}

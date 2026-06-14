@@ -23,15 +23,9 @@ async function searchWikipediaImage(title: string): Promise<string> {
   return page?.thumbnail?.source ?? '';
 }
 
-// 局別フォールバック画像（placehold.co でロゴ風プレースホルダー）
-const BROADCASTER_FALLBACKS: Record<string, string> = {
-  ntv:  'https://placehold.co/400x600/003087/ffffff?text=NTV',
-  ex:   'https://placehold.co/400x600/00a0e9/ffffff?text=EX',
-  tbs:  'https://placehold.co/400x600/e60012/ffffff?text=TBS',
-  tx:   'https://placehold.co/400x600/00a650/ffffff?text=TX',
-  cx:   'https://placehold.co/400x600/ff6600/ffffff?text=CX',
-  default: 'https://placehold.co/400x600/1a1a2e/ffffff?text=TV',
-};
+// TMDB・Wikipedia両方で画像が見つからなかった場合のセンチネル値
+// placehold.co を使うと次回のバッチでも再検出されてしまう無限ループになるため使用しない
+const NOT_FOUND_SENTINEL = 'not_found';
 
 export async function GET(request: Request) {
   const authHeader = request.headers.get('authorization');
@@ -69,10 +63,10 @@ export async function GET(request: Request) {
       source = 'wikipedia';
     }
 
-    // 3. どちらもなければフォールバック画像
+    // 3. どちらも見つからなければセンチネル値をセット（再処理ループを防ぐ）
     if (!url) {
-      url = BROADCASTER_FALLBACKS.default;
-      source = 'fallback';
+      url = NOT_FOUND_SENTINEL;
+      source = 'not_found';
       fallback++;
     }
 
