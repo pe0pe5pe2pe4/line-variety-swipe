@@ -1,8 +1,12 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
+import { rateLimit, rateLimited } from '@/lib/rate-limit';
 
 // あとで見るリスト: 右スワイプしたコンテンツ一覧を返す
 export async function GET(request: Request) {
+  const rl = rateLimit(request);
+  if (!rl.ok) return rateLimited(rl.retryAfter);
+
   const { searchParams } = new URL(request.url);
   const userId = searchParams.get('user_id');
   if (!userId) return NextResponse.json({ error: 'user_id required' }, { status: 400 });
@@ -42,6 +46,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const rl = rateLimit(request);
+  if (!rl.ok) return rateLimited(rl.retryAfter);
+
   const { user_id, content_id, direction } = await request.json();
 
   if (!user_id || !content_id || !direction) {

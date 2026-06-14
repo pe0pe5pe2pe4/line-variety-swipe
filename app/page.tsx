@@ -5,7 +5,11 @@ import Onboarding from '@/components/Onboarding';
 import DetailModal from '@/components/DetailModal';
 import WatchLaterList from '@/components/WatchLaterList';
 import MyPage, { Stats } from '@/components/MyPage';
+import SkeletonCard from '@/components/SkeletonCard';
+import PushPrompt from '@/components/PushPrompt';
+import InstallBanner from '@/components/InstallBanner';
 import { Content } from '@/lib/types';
+import { fetchWithRetry } from '@/lib/fetch-retry';
 
 const DUMMY_USER_ID = 'test-user-001';
 const ONBOARDING_KEY = 'onboarding_done';
@@ -31,6 +35,8 @@ export default function Home() {
   const [statsLoading, setStatsLoading] = useState(false);
   // これ以上取得できる番組が無くなったか（空状態の表示判定に使用）
   const [reachedEnd, setReachedEnd] = useState(false);
+  // 取得に失敗したか（再試行ボタンの表示判定）
+  const [loadError, setLoadError] = useState(false);
 
   // 無限スワイプ用：これまで表示したIDを記録し、追加取得時に除外する
   const seenSet = useRef<Set<string>>(new Set());
@@ -52,11 +58,13 @@ export default function Home() {
     if (initial) setLoading(true);
     try {
       const exclude = seenOrder.current.slice(-EXCLUDE_LIMIT).join(',');
-      const res = await fetch(
+      const res = await fetchWithRetry(
         `/api/recommend?user_id=${encodeURIComponent(uid)}&exclude=${encodeURIComponent(exclude)}`
       );
+      if (!res.ok) throw new Error(`status ${res.status}`);
       const data = await res.json();
       const items: Content[] = Array.isArray(data) ? data : [];
+      setLoadError(false);
       // 既出を除外して重複表示を防ぐ
       const fresh = items.filter((c) => c?.id && !seenSet.current.has(c.id));
       fresh.forEach((c) => markSeen(c.id));
@@ -66,7 +74,8 @@ export default function Home() {
       }
       setContents((prev) => (initial ? fresh : [...prev, ...fresh]));
     } catch {
-      // ネットワークエラー時は何もしない（次のスワイプで再試行される）
+      // 3回リトライしても失敗 → エラー表示（手動で再試行できる）
+      setLoadError(true);
     } finally {
       loadingMore.current = false;
       if (initial) setLoading(false);
@@ -169,10 +178,14 @@ export default function Home() {
     });
 
     if (direction === 'up') {
+      // 遷移先優先度: youtube → YouTube再生 / tver → Tver直接 /
+      // それ以外(tv_show) → 無料コンテンツの多い ABEMA 検索にフォールバック
       if (content.content_type === 'youtube' && content.youtube_url) {
         window.open(content.youtube_url, '_blank');
+      } else if (content.content_type === 'tver' && content.tver_url) {
+        window.open(content.tver_url, '_blank');
       } else {
-        window.open(`https://tver.jp/search/#${encodeURIComponent(content.title)}`, '_blank');
+        window.open(`https://abema.tv/search?q=${encodeURIComponent(content.title)}`, '_blank');
       }
     }
 
@@ -222,16 +235,24 @@ export default function Home() {
         {activeTab === 'swipe' && (
           <div className="flex flex-col items-center justify-center flex-1 px-4 pt-4 min-h-[calc(100vh-64px)]">
             {loading ? (
-              <div className="flex flex-col items-center gap-4">
-                <div className="w-12 h-12 rounded-full border-4 border-indigo-400 border-t-transparent animate-spin" />
-                <p className="text-slate-400 text-sm">読み込み中...</p>
-              </div>
+              <SkeletonCard />
             ) : contents.length === 0 ? (
-              reachedEnd ? (
+              loadError ? (
+                <div className="flex flex-col items-center gap-4 text-center px-8">
+                  <span className="text-5xl">😢</span>
+                  <p className="text-white text-lg font-bold">コンテンツの読み込みに失敗しました</p>
+                  <button
+                    onClick={() => { setLoadError(false); if (userId) loadMore(userId, true); }}
+                    className="mt-2 px-6 py-3 bg-indigo-500 text-white rounded-full font-bold hover:bg-indigo-400 active:scale-95 transition-all"
+                  >
+                    再試行
+                  </button>
+                </div>
+              ) : reachedEnd ? (
                 <div className="flex flex-col items-center gap-3 text-center px-8">
                   <span className="text-6xl">🎉</span>
-                  <p className="text-white text-xl font-bold">すべてチェックしました！</p>
-                  <p className="text-slate-400 text-sm">また後で来てください</p>
+                  <p className="text-white text-xl font-bold">今日のコンテンツは全部チェックしました！</p>
+                  <p className="text-slate-400 text-sm">明日また新しいコンテンツが追加されます</p>
                 </div>
               ) : (
                 <div className="flex flex-col items-center gap-4">
@@ -247,6 +268,18 @@ export default function Home() {
                 </div>
 
                 <div className="relative w-full max-w-sm" style={{ height: 'min(640px, calc(100dvh - 180px))' }}>
+                  {/* 3枚目は影だけ表示して「まだある」感を出す */}
+                  {contents.length > PRELOAD_COUNT && (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        inset: 0,
+                        transform: `scale(${1 - PRELOAD_COUNT * 0.04}) translateY(${PRELOAD_COUNT * 12}px)`,
+                        zIndex: 10 - PRELOAD_COUNT,
+                      }}
+                      className="rounded-3xl bg-slate-800/60 shadow-xl"
+                    />
+                  )}
                   {visibleCards.map((content, i) => {
                     const isTop = i === 0;
                     const scale = 1 - i * 0.04;
@@ -343,6 +376,12 @@ export default function Home() {
       {modalContent && (
         <DetailModal content={modalContent} onClose={() => setModalContent(null)} />
       )}
+
+      {/* Push 通知の許可ダイアログ（3回目以降の起動で表示） */}
+      <PushPrompt userId={userId} />
+
+      {/* PWA ホーム画面追加バナー */}
+      <InstallBanner />
     </>
   );
 }

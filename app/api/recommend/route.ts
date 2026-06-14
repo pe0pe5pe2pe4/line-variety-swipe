@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import type { Content } from '@/lib/types';
 import { inferGenre, resolveGenre } from '@/lib/genre';
+import { rateLimit, rateLimited } from '@/lib/rate-limit';
 
 // ───────────────────────────────────────────────
 // キーワード抽出ユーティリティ
@@ -136,7 +137,7 @@ async function fetchTVShows(
   let query = supabase
     .from('contents')
     .select('*')
-    .or('content_type.eq.tv_show,content_type.is.null')
+    .or('content_type.eq.tv_show,content_type.eq.tver,content_type.is.null')
     .not('thumbnail_url', 'eq', 'no_image')
     .order('description', { ascending: false, nullsFirst: false })
     .limit(120);
@@ -346,8 +347,12 @@ function normalizeTitle(title: string): string {
   return (title ?? '').trim().toLowerCase();
 }
 
+// 説明文がこの文字数以下の番組はスワイプ候補から除外（品質担保）
+const MIN_DESC_LEN = 11;
+
 /**
  * スワイプ済みタイトルを除外しつつ、タイトル重複を1件に集約する。
+ * 説明文が短すぎる（10文字以下）番組も品質確保のため除外する。
  * DBに同一番組が複数行存在しても、1度スワイプすれば再表示されなくなる。
  */
 function dedupeByTitle(list: Content[], excludeTitles: Set<string>): Content[] {
@@ -356,6 +361,7 @@ function dedupeByTitle(list: Content[], excludeTitles: Set<string>): Content[] {
   for (const c of list) {
     const key = normalizeTitle(c.title);
     if (!key) continue;
+    if ((c.description ?? '').trim().length < MIN_DESC_LEN) continue;
     if (excludeTitles.has(key) || seen.has(key)) continue;
     seen.add(key);
     result.push(c);
@@ -404,20 +410,56 @@ function mixContent(tvShows: Content[], ytVideos: Content[]): Content[] {
 }
 
 // ───────────────────────────────────────────────
+// 30秒キャッシュ（同一 user_id + exclude のリクエストはDBを叩かず即返す）
+// ───────────────────────────────────────────────
+type CacheEntry = { at: number; body: Content[]; headers: Record<string, string> };
+const RECO_CACHE = new Map<string, CacheEntry>();
+const RECO_TTL = 30_000;
+
+function cacheGet(key: string): CacheEntry | null {
+  const hit = RECO_CACHE.get(key);
+  if (hit && Date.now() - hit.at < RECO_TTL) return hit;
+  if (hit) RECO_CACHE.delete(key);
+  return null;
+}
+
+function cacheSet(key: string, body: Content[], headers: Record<string, string>) {
+  // 肥大化防止：古いエントリを掃除
+  if (RECO_CACHE.size > 500) {
+    const now = Date.now();
+    for (const [k, v] of RECO_CACHE) if (now - v.at >= RECO_TTL) RECO_CACHE.delete(k);
+  }
+  RECO_CACHE.set(key, { at: Date.now(), body, headers });
+}
+
+// ───────────────────────────────────────────────
 // メインハンドラ
 // ───────────────────────────────────────────────
 export async function GET(request: Request) {
+  const rl = rateLimit(request);
+  if (!rl.ok) return rateLimited(rl.retryAfter);
+
   const { searchParams } = new URL(request.url);
   const userId = searchParams.get('user_id');
   if (!userId) return NextResponse.json({ error: 'user_id required' }, { status: 400 });
 
   // クライアントが既に表示済み（スワイプ反映前）のIDを除外できるようにする
   const excludeParam = searchParams.get('exclude') ?? '';
+
+  // 30秒キャッシュ判定
+  const cacheKey = `${userId}|${excludeParam}`;
+  const cached = cacheGet(cacheKey);
+  if (cached) {
+    return NextResponse.json(cached.body, {
+      headers: { ...cached.headers, 'X-Cache': 'HIT' },
+    });
+  }
   const clientExcludeIds = excludeParam
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
 
+  try {
   // ── STEP 1: スワイプ履歴取得 ──
   const { data: allSwipes } = await supabase
     .from('swipes')
@@ -507,12 +549,20 @@ export async function GET(request: Request) {
     recommend_reason: reasonFor(c, profile),
   }));
 
-  return NextResponse.json(result, {
-    headers: {
-      'X-Mix-Ratio': `tv=${finalTvShows.length}/yt=${actualYtCount}`,
-      'X-Right-Swipes': String(rightSwipeCount),
-      'X-Top-Genre': profile.topGenre ?? '',
-      'X-Keywords': keywords.slice(0, 5).join(','),
-    },
-  });
+  const headers: Record<string, string> = {
+    'X-Mix-Ratio': `tv=${finalTvShows.length}/yt=${actualYtCount}`,
+    'X-Right-Swipes': String(rightSwipeCount),
+    'X-Top-Genre': profile.topGenre ?? '',
+    'X-Keywords': keywords.slice(0, 5).join(','),
+    'Cache-Control': 'private, max-age=30',
+  };
+  cacheSet(cacheKey, result, headers);
+
+  return NextResponse.json(result, { headers: { ...headers, 'X-Cache': 'MISS' } });
+  } catch (e) {
+    return NextResponse.json(
+      { error: 'recommend failed', detail: String(e) },
+      { status: 500 }
+    );
+  }
 }

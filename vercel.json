@@ -5,6 +5,8 @@
     { "path": "/api/fix-images",              "schedule": "0 22 * * *" },
     { "path": "/api/ingest-youtube?batch=0",  "schedule": "0 22 * * *" },
     { "path": "/api/ingest-youtube?batch=1",  "schedule": "15 22 * * *" },
-    { "path": "/api/fetch-episodes",          "schedule": "0 23 * * *" }
+    { "path": "/api/fetch-episodes",          "schedule": "0 23 * * *" },
+    { "path": "/api/ingest-tver",             "schedule": "0 21 * * 1" },
+    { "path": "/api/enrich-contents",         "schedule": "30 23 * * *" }
   ]
 }

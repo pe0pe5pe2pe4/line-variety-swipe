@@ -16,6 +16,8 @@ export type Stats = {
   topPrograms: TopProgram[];
   genreRanking: { name: string; count: number }[];
   stationRanking: { name: string; count: number }[];
+  weeklyTopPrograms?: TopProgram[];
+  tastePercentile?: { genre: string; topPercent: number } | null;
 };
 
 type Props = {
@@ -84,6 +86,16 @@ export default function MyPage({ stats, loading }: Props) {
 
   return (
     <div className="w-full max-w-sm mx-auto px-4 pb-4 flex flex-col gap-4">
+      {/* 好み傾向 */}
+      {stats.tastePercentile && (
+        <div className="bg-gradient-to-br from-purple-500/30 to-indigo-700/20 rounded-2xl p-4 text-center">
+          <p className="text-slate-300 text-xs">あなたの好み傾向</p>
+          <p className="text-white text-lg font-black mt-1">
+            「{stats.tastePercentile.genre}」好きの上位 {stats.tastePercentile.topPercent}%
+          </p>
+        </div>
+      )}
+
       {/* サマリーカード */}
       <div className="grid grid-cols-2 gap-3">
         <div className="bg-gradient-to-br from-indigo-500/30 to-indigo-700/20 rounded-2xl p-4 text-center">
@@ -126,6 +138,30 @@ export default function MyPage({ stats, loading }: Props) {
           </div>
         )}
       </div>
+
+      {/* 今週のトレンド（全ユーザーで最も右スワイプされた番組） */}
+      {stats.weeklyTopPrograms && stats.weeklyTopPrograms.length > 0 && (
+        <div className="bg-slate-800/60 rounded-2xl p-4">
+          <h2 className="text-white font-bold text-sm mb-3">🔥 今週みんなが選んだ番組 TOP5</h2>
+          <div className="flex flex-col gap-3">
+            {stats.weeklyTopPrograms.map((p, i) => (
+              <div key={p.id} className="flex items-center gap-3">
+                <span className="text-orange-300 font-black text-lg w-5 text-center">{i + 1}</span>
+                <div className="relative w-12 h-14 flex-shrink-0 rounded-lg overflow-hidden bg-slate-700">
+                  <ContentImage src={p.thumbnail_url} alt={p.title} channelName={p.channel_name ?? undefined} sizes="48px" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-white text-sm font-bold line-clamp-2 leading-tight">{p.title}</p>
+                  {p.channel_name && (
+                    <p className="text-slate-400 text-xs truncate mt-0.5">{p.channel_name}</p>
+                  )}
+                </div>
+                <span className="text-slate-400 text-xs flex-shrink-0">♥{p.count}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ジャンル・放送局ランキング */}
       <RankingList title="好きなジャンル" emoji="🎭" items={stats.genreRanking} />

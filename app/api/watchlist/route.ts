@@ -1,9 +1,13 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
+import { rateLimit, rateLimited } from '@/lib/rate-limit';
 
 // あとで見るリスト: 右スワイプした番組・動画を新しい順で返す
 // direction='right' の swipes と contents を JOIN（重複は最新の1件に集約）
 export async function GET(request: Request) {
+  const rl = rateLimit(request);
+  if (!rl.ok) return rateLimited(rl.retryAfter);
+
   const { searchParams } = new URL(request.url);
   const userId = searchParams.get('user_id');
   if (!userId) {

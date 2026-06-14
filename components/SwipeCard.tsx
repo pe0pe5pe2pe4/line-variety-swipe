@@ -2,7 +2,7 @@
 import { useRef } from 'react';
 import { useSpring, animated } from '@react-spring/web';
 import { useDrag } from '@use-gesture/react';
-import { Content } from '@/lib/types';
+import { Content, getDisplayDescription } from '@/lib/types';
 import { inferGenre } from '@/lib/genre';
 import ContentImage from './ContentImage';
 import ShareButton from './ShareButton';
@@ -27,6 +27,18 @@ export default function SwipeCard({ content, onSwipe, onShowDetail, isTop }: Pro
 
   const gone = useRef(false);
 
+  // ハプティクス：右=50ms / 上=100ms
+  const haptic = (dir: 'left' | 'right' | 'up') => {
+    if (typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') return;
+    if (dir === 'up') navigator.vibrate(100);
+    else if (dir === 'right') navigator.vibrate(50);
+  };
+
+  const commit = (dir: 'left' | 'right' | 'up') => {
+    haptic(dir);
+    onSwipe(dir);
+  };
+
   // filterTaps:false → tap イベントも callback に届く（tap:true で判定）
   const bind = useDrag(
     ({ active, movement: [mx, my], velocity: [vx, vy], tap }) => {
@@ -45,6 +57,7 @@ export default function SwipeCard({ content, onSwipe, onShowDetail, isTop }: Pro
 
       if (!active && upTrigger && isVertical) {
         gone.current = true;
+        haptic('up');
         api.start({
           y: -(window.innerHeight * 1.5),
           opacity: 0,
@@ -53,6 +66,7 @@ export default function SwipeCard({ content, onSwipe, onShowDetail, isTop }: Pro
       } else if (!active && horizTrigger && !isVertical) {
         gone.current = true;
         const dir = mx > 0 ? 1 : -1;
+        haptic(dir > 0 ? 'right' : 'left');
         api.start({
           x: dir * window.innerWidth * 1.5,
           rotate: dir * 30,
@@ -185,15 +199,15 @@ export default function SwipeCard({ content, onSwipe, onShowDetail, isTop }: Pro
             <p className="text-slate-200 text-xs truncate">{meta}</p>
           ) : null}
 
-          {content.description ? (
-            <p className="text-slate-300 text-sm line-clamp-2">{content.description}</p>
+          {getDisplayDescription(content) ? (
+            <p className="text-slate-300 text-sm line-clamp-2">{getDisplayDescription(content)}</p>
           ) : null}
 
           {/* Action buttons */}
           <div className="flex justify-center items-center gap-6 pt-2">
             {/* NOPE */}
             <button
-              onPointerDown={(e) => { e.stopPropagation(); onSwipe('left'); }}
+              onPointerDown={(e) => { e.stopPropagation(); commit('left'); }}
               className="w-[56px] h-[56px] flex items-center justify-center rounded-full bg-white/90 text-rose-500 text-2xl shadow-lg active:scale-90 transition-transform"
               aria-label="Skip"
             >
@@ -202,7 +216,7 @@ export default function SwipeCard({ content, onSwipe, onShowDetail, isTop }: Pro
 
             {/* NOW（上スワイプ = 今すぐ見る） */}
             <button
-              onPointerDown={(e) => { e.stopPropagation(); onSwipe('up'); }}
+              onPointerDown={(e) => { e.stopPropagation(); commit('up'); }}
               className="w-[48px] h-[48px] flex items-center justify-center rounded-full bg-sky-500 text-white text-lg shadow-lg active:scale-90 transition-transform"
               aria-label="Watch Now"
             >
@@ -211,7 +225,7 @@ export default function SwipeCard({ content, onSwipe, onShowDetail, isTop }: Pro
 
             {/* LIKE（あとで見る） */}
             <button
-              onPointerDown={(e) => { e.stopPropagation(); onSwipe('right'); }}
+              onPointerDown={(e) => { e.stopPropagation(); commit('right'); }}
               className="w-[56px] h-[56px] flex items-center justify-center rounded-full bg-emerald-500 text-white text-2xl shadow-lg active:scale-90 transition-transform"
               aria-label="Like"
             >

@@ -22,6 +22,7 @@ export default function WatchLaterList({ items, onShowDetail }: Props) {
     <div className="w-full max-w-sm mx-auto px-4 pb-4">
       {items.map((item) => {
         const isYoutube = item.content_type === 'youtube';
+        const hasAffiliate = !!item.vod_affiliate_url?.trim();
 
         return (
           <button
@@ -50,11 +51,18 @@ export default function WatchLaterList({ items, onShowDetail }: Props) {
               {item.description ? (
                 <p className="text-slate-400 text-xs mt-1 line-clamp-2">{item.description}</p>
               ) : null}
-              {isYoutube && (
-                <span className="inline-block mt-1.5 text-xs bg-red-500/20 text-red-400 px-2 py-0.5 rounded-full">
-                  YouTube
-                </span>
-              )}
+              <div className="flex flex-wrap gap-1.5 mt-1.5">
+                {hasAffiliate && (
+                  <span className="inline-block text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full font-bold">
+                    ⭐ おすすめ
+                  </span>
+                )}
+                {isYoutube && (
+                  <span className="inline-block text-xs bg-red-500/20 text-red-400 px-2 py-0.5 rounded-full">
+                    YouTube
+                  </span>
+                )}
+              </div>
             </div>
 
             {/* Chevron */}

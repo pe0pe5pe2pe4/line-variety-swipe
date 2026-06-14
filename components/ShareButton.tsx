@@ -16,7 +16,10 @@ export default function ShareButton({ content, className }: Props) {
         : typeof window !== 'undefined'
           ? window.location.origin
           : '';
-    return `「${content.title}」が気になってる🎬\nバラ推しで発見したよ！\nあなたのおすすめは？\n${url}`;
+    // アフィリエイトリンクがあればシェアテキストにも含める（収益最大化）
+    const affiliate = content.vod_affiliate_url?.trim();
+    const affiliateLine = affiliate ? `\n▶ 視聴はこちら: ${affiliate}` : '';
+    return `「${content.title}」が気になってる🎬\nバラ推しで発見したよ！\nあなたのおすすめは？${affiliateLine}\n${url}`;
   };
 
   const handleShare = async (e: React.MouseEvent) => {
