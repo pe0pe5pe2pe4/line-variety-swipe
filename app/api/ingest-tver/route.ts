@@ -43,6 +43,35 @@ type TverEpisode = {
   channelName: string;
 };
 
+// 日本語の放送日文字列を ISO 日付 (YYYY-MM-DD) に変換する。
+// 「6月11日(水)放送」→「2026-06-11」 / 「2024年3月15日」→「2024-03-15」
+// 「毎週水曜日」など日付特定不能なものは null（不明でも insert は続行）。
+function parseBroadcastDate(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const s = String(raw).trim();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const valid = (m: number, d: number) => m >= 1 && m <= 12 && d >= 1 && d <= 31;
+
+  // ISO 形式 (YYYY-MM-DD / YYYY/MM/DD)
+  let m = s.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (m && valid(Number(m[2]), Number(m[3]))) {
+    return `${m[1]}-${pad(Number(m[2]))}-${pad(Number(m[3]))}`;
+  }
+  // 年付き和暦表記 (YYYY年M月D日) — 年を優先するため M月D日 より先に判定
+  m = s.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/);
+  if (m && valid(Number(m[2]), Number(m[3]))) {
+    return `${m[1]}-${pad(Number(m[2]))}-${pad(Number(m[3]))}`;
+  }
+  // 年なし和暦表記 (M月D日) → 現在の年を使用
+  m = s.match(/(\d{1,2})月(\d{1,2})日/);
+  if (m && valid(Number(m[1]), Number(m[2]))) {
+    const year = new Date().getUTCFullYear();
+    return `${year}-${pad(Number(m[1]))}-${pad(Number(m[2]))}`;
+  }
+  // 「毎週水曜日」など特定不能 → null
+  return null;
+}
+
 // Tver Platform API から全エピソードを取得（タイムアウト時は [] を返す）
 async function fetchAllFromTverApi(): Promise<TverEpisode[]> {
   let createRes: Response;
@@ -185,7 +214,7 @@ async function upsertEpisodes(episodes: TverEpisode[]): Promise<UpsertResult> {
       content_type: 'tver',
       tver_url: ep.tverUrl,
       episode_title: ep.episodeTitle,
-      broadcast_date: ep.broadcastDate,
+      broadcast_date: parseBroadcastDate(ep.broadcastDate),
       channel_name: ep.channelName,
       genre: inferGenre(ep),
       source: 'tver',
