@@ -142,6 +142,13 @@ export default function SwipeCard({ content, onSwipe, onShowDetail, isTop }: Pro
         {/* Info */}
         <div className="flex flex-col flex-1 p-4 gap-1.5">
           <h2 className="text-xl font-bold text-gray-900 leading-tight line-clamp-2">{content.title}</h2>
+          {(content.episode_number || (content.broadcast_date && content.broadcast_date !== 'unknown')) && (
+            <p className="text-xs text-indigo-400 truncate">
+              {[content.episode_number, content.broadcast_date].filter(
+                (v) => v && v !== 'unknown'
+              ).join(' • ')}
+            </p>
+          )}
           <p className="text-sm text-gray-500 line-clamp-2 flex-1">{content.description}</p>
 
           {/* Action buttons */}

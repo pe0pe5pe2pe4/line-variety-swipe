@@ -3,9 +3,9 @@ import { supabase } from '@/lib/supabase';
 import { searchTMDBShow } from '@/lib/tmdb';
 
 const WIKIPEDIA_API = 'https://ja.wikipedia.org/w/api.php';
-const BATCH_LIMIT = 20;
+// 15件×平均600ms ≈ 9秒（Vercelタイムアウト余裕あり）
+const BATCH_SIZE = 15;
 
-// 民放各局のバラエティカテゴリ（実在するものだけ）
 const VARIETY_CATEGORIES = [
   '日本テレビのバラエティ番組',
   'テレビ朝日のバラエティ番組',
@@ -14,7 +14,6 @@ const VARIETY_CATEGORIES = [
   'フジテレビのバラエティ番組',
 ];
 
-// カテゴリ → 放送局コード（fix-imagesで放送局ロゴを使うために保存）
 const CATEGORY_BROADCASTER: Record<string, string> = {
   '日本テレビのバラエティ番組': 'ntv',
   'テレビ朝日のバラエティ番組': 'ex',
@@ -23,29 +22,34 @@ const CATEGORY_BROADCASTER: Record<string, string> = {
   'フジテレビのバラエティ番組': 'cx',
 };
 
-async function fetchCategoryTitles(category: string, continueToken?: string): Promise<{
-  titles: string[];
-  nextContinue?: string;
-}> {
-  const params = new URLSearchParams({
-    action: 'query',
-    list: 'categorymembers',
-    cmtitle: `Category:${category}`,
-    cmlimit: '50',
-    cmtype: 'page',
-    format: 'json',
-    origin: '*',
-    ...(continueToken ? { cmcontinue: continueToken } : {}),
-  });
+// カテゴリの全タイトルをページネーションで全件取得
+async function fetchAllCategoryTitles(category: string): Promise<string[]> {
+  const allTitles: string[] = [];
+  let continueToken: string | undefined;
 
-  const res = await fetch(`${WIKIPEDIA_API}?${params}`);
-  if (!res.ok) return { titles: [] };
-  const data = await res.json();
-  const titles: string[] = (data?.query?.categorymembers ?? []).map(
-    (m: { title: string }) => m.title
-  );
-  const nextContinue = data?.continue?.cmcontinue;
-  return { titles, nextContinue };
+  do {
+    const params = new URLSearchParams({
+      action: 'query',
+      list: 'categorymembers',
+      cmtitle: `Category:${category}`,
+      cmlimit: '500',
+      cmtype: 'page',
+      format: 'json',
+      origin: '*',
+      ...(continueToken ? { cmcontinue: continueToken } : {}),
+    });
+
+    const res = await fetch(`${WIKIPEDIA_API}?${params}`);
+    if (!res.ok) break;
+    const data = await res.json();
+    const titles: string[] = (data?.query?.categorymembers ?? []).map(
+      (m: { title: string }) => m.title
+    );
+    allTitles.push(...titles);
+    continueToken = data?.continue?.cmcontinue;
+  } while (continueToken);
+
+  return allTitles;
 }
 
 async function fetchWikipediaDescription(title: string): Promise<string> {
@@ -86,7 +90,6 @@ async function fetchWikipediaImage(title: string): Promise<string> {
   return page?.thumbnail?.source ?? '';
 }
 
-
 export async function GET(request: Request) {
   const authHeader = request.headers.get('authorization');
   const cronSecret = process.env.CRON_SECRET;
@@ -95,43 +98,75 @@ export async function GET(request: Request) {
   }
 
   const { searchParams } = new URL(request.url);
-  // catIndex: どのカテゴリを処理中か（0〜4）
+  // catIndex: 対象カテゴリ（0=日テレ, 1=テレ朝, 2=TBS, 3=テレ東, 4=フジ）
   const catIndex = parseInt(searchParams.get('catIndex') ?? '0', 10);
-  const continueToken = searchParams.get('continue') ?? undefined;
+  // batch: バッチ番号（0始まり、15件ずつ）
+  const batch = parseInt(searchParams.get('batch') ?? '0', 10);
 
   const category = VARIETY_CATEGORIES[catIndex];
   if (!category) {
-    return NextResponse.json({ error: 'invalid catIndex' }, { status: 400 });
+    return NextResponse.json(
+      {
+        error: 'invalid catIndex (0-4)',
+        usage: '/api/ingest?catIndex=0&batch=0',
+        categories: VARIETY_CATEGORIES.map((c, i) => `${i}: ${c}`),
+      },
+      { status: 400 }
+    );
   }
 
-  const { titles, nextContinue } = await fetchCategoryTitles(category, continueToken);
+  // カテゴリの全タイトルを取得（内部でページネーション）
+  const allRawTitles = await fetchAllCategoryTitles(category);
+  const total = allRawTitles.length;
+
+  // バッチ N の範囲を処理
+  const batchRawTitles = allRawTitles.slice(batch * BATCH_SIZE, (batch + 1) * BATCH_SIZE);
+
+  if (batchRawTitles.length === 0) {
+    const nextCatIndex = catIndex + 1 < VARIETY_CATEGORIES.length ? catIndex + 1 : null;
+    return NextResponse.json({
+      category,
+      batch,
+      total,
+      processed: 0,
+      inserted: 0,
+      skipped: 0,
+      nextBatch: null,
+      nextCatIndex,
+      hint: nextCatIndex !== null
+        ? `/api/ingest?catIndex=${nextCatIndex}&batch=0`
+        : 'all categories complete',
+    });
+  }
+
+  // 括弧付き曖昧回避を除去してクリーンタイトルに変換
+  const cleanedTitles = batchRawTitles.map((t) =>
+    t.replace(/\s*[（(][^）)]*[）)]\s*$/, '').trim()
+  );
+
+  // 一括重複チェック（N+1クエリ回避）
+  const { data: existingRows } = await supabase
+    .from('contents')
+    .select('title')
+    .in('title', cleanedTitles);
+  const existingSet = new Set((existingRows ?? []).map((r) => r.title));
 
   let inserted = 0;
   let skipped = 0;
   const errors: { title: string; error: string }[] = [];
-
   const broadcaster = CATEGORY_BROADCASTER[category] ?? 'other';
 
-  for (const rawTitle of titles.slice(0, BATCH_LIMIT)) {
-    // 括弧付きの曖昧回避を除去（例: "アナザースカイ (テレビ番組)" → "アナザースカイ"）
-    const title = rawTitle.replace(/\s*[（(][^）)]*[）)]\s*$/, '').trim();
+  for (let i = 0; i < batchRawTitles.length; i++) {
+    const rawTitle = batchRawTitles[i];
+    const title = cleanedTitles[i];
 
-    // 重複チェック（unique constraintがないためselect→insertで重複を防ぐ）
-    const { data: existing } = await supabase
-      .from('contents')
-      .select('id')
-      .eq('title', title)
-      .limit(1);
-
-    if (existing && existing.length > 0) {
+    if (existingSet.has(title)) {
       skipped++;
       continue;
     }
 
     const { tmdb_id, thumbnail_url: tmdbThumb, description: tmdbDesc } = await searchTMDBShow(title);
     const description = tmdbDesc || (await fetchWikipediaDescription(rawTitle));
-
-    // TMDBに画像がなければWikipediaのページ画像で補完
     const thumbnail_url = tmdbThumb || (await fetchWikipediaImage(rawTitle));
 
     const { error } = await supabase.from('contents').insert({
@@ -155,17 +190,24 @@ export async function GET(request: Request) {
     }
   }
 
-  // 次のバッチ情報（フロントエンドや手動実行で使える）
-  const nextCatIndex = nextContinue ? catIndex : catIndex + 1;
-  const hasMore = nextContinue != null || nextCatIndex < VARIETY_CATEGORIES.length;
+  const nextBatch = (batch + 1) * BATCH_SIZE < total ? batch + 1 : null;
+  const nextCatIndex =
+    nextBatch === null && catIndex + 1 < VARIETY_CATEGORIES.length ? catIndex + 1 : null;
 
   return NextResponse.json({
     category,
+    batch,
+    total,
+    processed: batchRawTitles.length,
     inserted,
     skipped,
     errors: errors.length > 0 ? errors : undefined,
-    nextContinue: nextContinue ?? null,
+    nextBatch,
     nextCatIndex,
-    hasMore,
+    hint: nextBatch !== null
+      ? `/api/ingest?catIndex=${catIndex}&batch=${nextBatch}`
+      : nextCatIndex !== null
+      ? `/api/ingest?catIndex=${nextCatIndex}&batch=0`
+      : 'all done',
   });
 }

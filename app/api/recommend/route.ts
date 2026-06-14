@@ -239,6 +239,28 @@ async function fetchYouTubeVideos(
 }
 
 // ───────────────────────────────────────────────
+// 初期ユーザー向け：DB保存済みYouTube動画を返す（API不使用）
+// ───────────────────────────────────────────────
+async function fetchStoredYouTubeVideos(
+  swipedIds: string[],
+  count: number
+): Promise<Content[]> {
+  let query = supabase
+    .from('contents')
+    .select('*')
+    .eq('content_type', 'youtube')
+    .not('thumbnail_url', 'eq', 'no_image')
+    .limit(count * 3);
+
+  if (swipedIds.length > 0) {
+    query = query.not('id', 'in', `(${swipedIds.join(',')})`);
+  }
+
+  const { data } = await query;
+  return shuffle((data ?? []) as Content[]).slice(0, count);
+}
+
+// ───────────────────────────────────────────────
 // ユーティリティ
 // ───────────────────────────────────────────────
 function shuffle<T>(arr: T[]): T[] {
@@ -316,14 +338,14 @@ export async function GET(request: Request) {
     }
   }
 
-  // ── STEP 3: 混在比率を決定 ──
+  // ── STEP 3: 混在比率を決定（2段階パーソナライズ）──
   let tvRatio: number;
-  if (rightSwipeCount <= 10) {
-    tvRatio = 0.7; // tv 70% / youtube 30%
-  } else if (rightSwipeCount <= 30) {
-    tvRatio = 0.5; // tv 50% / youtube 50%
+  if (rightSwipeCount < 10) {
+    tvRatio = 0.7; // 0-9件: tv 70% / youtube 30%（固定コンテンツ・API不使用）
+  } else if (rightSwipeCount < 30) {
+    tvRatio = 0.5; // 10-29件: tv 50% / youtube 50%（動的キーワード検索）
   } else {
-    tvRatio = 0.3; // tv 30% / youtube 70%
+    tvRatio = 0.3; // 30+件: tv 30% / youtube 70%（フル最適化）
   }
 
   const TOTAL = 10;
@@ -331,9 +353,13 @@ export async function GET(request: Request) {
   const ytCount = TOTAL - tvCount;
 
   // ── STEP 4: 全ソースから並列取得 ──
+  // 0-9スワイプ：DBのキャッシュ済みYouTube（API呼び出しなし）
+  // 10+スワイプ：リアルタイムYouTube API検索
   const [tvShows, ytVideos] = await Promise.all([
-    fetchTVShows(swipedIds, freqMap, tvCount + ytCount), // 余裕を持って多めに取得
-    fetchYouTubeVideos(keywords, swipedIds, ytCount),
+    fetchTVShows(swipedIds, freqMap, tvCount + ytCount),
+    rightSwipeCount < 10
+      ? fetchStoredYouTubeVideos(swipedIds, ytCount)
+      : fetchYouTubeVideos(keywords, swipedIds, ytCount),
   ]);
 
   // YouTube が足りない場合は TV で補完

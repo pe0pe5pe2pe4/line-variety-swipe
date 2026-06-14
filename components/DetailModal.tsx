@@ -70,6 +70,13 @@ export default function DetailModal({ content, onClose }: Props) {
             {content.channel_name && (
               <p className="text-xs text-slate-400 mt-1">{content.channel_name}</p>
             )}
+            {(content.episode_number || (content.broadcast_date && content.broadcast_date !== 'unknown')) && (
+              <p className="text-xs text-indigo-500 mt-1">
+                {[content.episode_number, content.broadcast_date].filter(
+                  (v) => v && v !== 'unknown'
+                ).join(' • ')}
+              </p>
+            )}
             {content.description ? (
               <p className="text-sm text-gray-500 mt-2 leading-relaxed">{content.description}</p>
             ) : null}

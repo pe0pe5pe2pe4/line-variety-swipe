@@ -9,6 +9,9 @@ export type Content = {
   content_type?: ContentType;
   youtube_url?: string;
   channel_name?: string;
+  episode_number?: string;
+  episode_title?: string;
+  broadcast_date?: string;
 };
 
 export function getThumbnailSrc(url: string | undefined | null): string {
