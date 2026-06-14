@@ -27,6 +27,14 @@ export default function ShareButton({ content, className }: Props) {
     e.stopPropagation();
     const text = buildShareText();
 
+    // LINE 環境では shareTargetPicker で友達に直接シェア
+    try {
+      const { shareViaLiff } = await import('@/lib/liff');
+      if (await shareViaLiff(text)) return;
+    } catch {
+      // フォールバックへ
+    }
+
     // Web Share API（LINEを含む各SNSのネイティブ共有シートを表示）
     if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
       try {

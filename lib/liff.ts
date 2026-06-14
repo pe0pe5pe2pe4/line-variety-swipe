@@ -33,3 +33,29 @@ export async function initializeLiff(): Promise<LiffProfile | null> {
     pictureUrl: profile.pictureUrl ?? undefined,
   };
 }
+
+/**
+ * LINE の友達に直接シェア（shareTargetPicker）。
+ * LINE 環境でなければ false を返す（呼び出し元で Web Share / LINE URL にフォールバック）。
+ */
+export async function shareViaLiff(text: string): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
+  const liffId = process.env.NEXT_PUBLIC_LIFF_ID;
+  if (!liffId || liffId === 'dummy') return false;
+
+  try {
+    const { default: liff } = await import('@line/liff');
+    try {
+      await liff.init({ liffId });
+    } catch {
+      // 既に初期化済みなら無視
+    }
+    if (typeof liff.isApiAvailable === 'function' && liff.isApiAvailable('shareTargetPicker')) {
+      await liff.shareTargetPicker([{ type: 'text', text }]);
+      return true;
+    }
+  } catch {
+    // 失敗時はフォールバックさせる
+  }
+  return false;
+}

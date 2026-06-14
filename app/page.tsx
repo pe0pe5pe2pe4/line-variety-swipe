@@ -379,7 +379,7 @@ export default function Home() {
       </main>
 
       {/* Bottom tab bar */}
-      <nav className="fixed bottom-0 left-0 right-0 h-16 bg-slate-900/95 backdrop-blur border-t border-slate-700 flex z-40">
+      <nav className="fixed bottom-0 left-0 right-0 h-16 bg-slate-900/95 backdrop-blur border-t border-slate-700 flex z-40 safe-bottom">
         <button
           onClick={() => setActiveTab('swipe')}
           className={`flex-1 flex flex-col items-center justify-center gap-0.5 text-xs transition-colors ${

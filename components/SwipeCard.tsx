@@ -110,7 +110,7 @@ export default function SwipeCard({ content, onSwipe, onShowDetail, isTop }: Pro
       }}
       // 長押し：モバイルで contextmenu イベントが発火する
       onContextMenu={(e) => { e.preventDefault(); if (isTop && !gone.current) onShowDetail(); }}
-      className="will-change-transform"
+      className="will-change-transform swipe-surface"
     >
       {/* TikTok風 縦型フルスクリーンカード：画像全面 + 下部グラデにテキスト */}
       <div className="relative w-full h-full rounded-3xl shadow-2xl overflow-hidden bg-black">

@@ -19,10 +19,27 @@
   }
 }
 
+html {
+  /* LINE WebView での慣性スクロール最適化 */
+  -webkit-overflow-scrolling: touch;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+/* LINE のセーフエリア（ホームバー等）に対応 */
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* スワイプ要素はブラウザのスクロール/ズームを抑止 */
+.swipe-surface {
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 @keyframes fadeInUp {

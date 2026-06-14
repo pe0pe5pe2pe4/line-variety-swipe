@@ -60,6 +60,8 @@ type Profile = {
   topGenre?: string;
   topStation?: string;
   cooldownGenre?: string; // 直近に偏ったジャンル → 一時的に下げる
+  timeBoostGenres?: Set<string>; // 時間帯別に優先するジャンル
+  cfBoostIds?: Set<string>; // 協調フィルタリングで優先する番組ID
 };
 
 const W_GENRE = 3;
@@ -114,7 +116,69 @@ function scoreWithProfile(c: Content, p: Profile): number {
   score -= PENALTY_DISLIKED_GENRE * (p.dislikedGenres[genre] ?? 0);
   // 直近に偏ったジャンルは強めに下げて別ジャンルを優先させる（バグ2）
   if (p.cooldownGenre && genre === p.cooldownGenre) score -= 5;
+  // 時間帯別ブースト（TASK3）
+  if (p.timeBoostGenres?.has(genre)) score += 1.5;
+  // 協調フィルタリング：似たユーザーが好んだ番組（TASK3）
+  if (p.cfBoostIds?.has(c.id)) score += 2;
+  // 鮮度スコア：7日以内は加点 / 30日以上は減点（TASK3）
+  score += freshnessBonus((c as { created_at?: string }).created_at);
   return score;
+}
+
+// 新しいコンテンツを優遇し、古いコンテンツの頻度を下げる
+function freshnessBonus(createdAt?: string): number {
+  if (!createdAt) return 0;
+  const t = new Date(createdAt).getTime();
+  if (Number.isNaN(t)) return 0;
+  const days = (Date.now() - t) / (24 * 60 * 60 * 1000);
+  if (days <= 7) return 2;
+  if (days >= 30) return -1;
+  return 0;
+}
+
+// 時間帯別に優先するジャンル（JST基準）
+function timeBoostGenresForNow(): Set<string> {
+  const jstHour = (new Date().getUTCHours() + 9) % 24;
+  if (jstHour >= 6 && jstHour < 11) return new Set(['情報・ワイドショー']);
+  if (jstHour >= 11 && jstHour < 15) return new Set(['トーク', 'お笑い・バラエティ']);
+  if (jstHour >= 18 && jstHour < 24) return new Set(['お笑い・バラエティ', 'ドッキリ・企画']);
+  return new Set();
+}
+
+// 協調フィルタリング：自分と同じ番組を好んだユーザーが右スワイプした番組IDを集める
+async function collaborativeBoostIds(userId: string, rightSwipeIds: string[]): Promise<Set<string>> {
+  const out = new Set<string>();
+  if (rightSwipeIds.length === 0) return out;
+  try {
+    // 自分が好きな番組を好きな「似たユーザー」を特定
+    const { data: peers } = await supabase
+      .from('swipes')
+      .select('user_id')
+      .eq('direction', 'right')
+      .in('content_id', rightSwipeIds.slice(0, 100))
+      .neq('user_id', userId)
+      .limit(500);
+    const overlap = new Map<string, number>();
+    for (const p of (peers ?? []) as { user_id: string }[]) {
+      overlap.set(p.user_id, (overlap.get(p.user_id) ?? 0) + 1);
+    }
+    const topUsers = [...overlap.entries()]
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 20)
+      .map(([u]) => u);
+    if (topUsers.length === 0) return out;
+
+    const { data: theirLikes } = await supabase
+      .from('swipes')
+      .select('content_id')
+      .eq('direction', 'right')
+      .in('user_id', topUsers)
+      .limit(500);
+    for (const l of (theirLikes ?? []) as { content_id: string }[]) out.add(l.content_id);
+  } catch {
+    // 失敗しても致命的ではない
+  }
+  return out;
 }
 
 /** 推薦理由（トップ嗜好に一致する場合のみ付与） */
@@ -579,6 +643,8 @@ export async function GET(request: Request) {
     keywords = extractSearchKeywords(likedContents);
   }
   profile.cooldownGenre = cooldownGenre;
+  profile.timeBoostGenres = timeBoostGenresForNow();
+  profile.cfBoostIds = await collaborativeBoostIds(userId, rightSwipeIds);
 
   // ── STEP 3: 混在比率を決定（2段階パーソナライズ）──
   let tvRatio: number;
@@ -618,11 +684,22 @@ export async function GET(request: Request) {
     recommend_reason: reasonFor(c, profile),
   }));
 
+  // まだスワイプしていない番組の総数（概算）
+  const { count: totalContents } = await supabase
+    .from('contents')
+    .select('id', { count: 'exact', head: true })
+    .not('thumbnail_url', 'eq', 'no_image');
+  const totalAvailable = Math.max(0, (totalContents ?? 0) - swipedIds.length);
+  // パーソナライズ度合い（0-100）：右スワイプ数に応じて上昇
+  const personalizationScore = Math.min(100, Math.round((rightSwipeCount / 20) * 100));
+
   const headers: Record<string, string> = {
     'X-Mix-Ratio': `tv=${finalTvShows.length}/yt=${actualYtCount}`,
     'X-Right-Swipes': String(rightSwipeCount),
     'X-Top-Genre': profile.topGenre ?? '',
     'X-Keywords': keywords.slice(0, 5).join(','),
+    'X-Total-Available': String(totalAvailable),
+    'X-Personalization-Score': String(personalizationScore),
     'Cache-Control': 'private, max-age=30',
   };
   cacheSet(cacheKey, result, headers);
