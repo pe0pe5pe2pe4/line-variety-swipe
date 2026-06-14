@@ -59,6 +59,24 @@ async function fetchWikipediaDescription(title: string): Promise<string> {
   return page?.extract?.trim() ?? '';
 }
 
+async function fetchWikipediaImage(title: string): Promise<string> {
+  const params = new URLSearchParams({
+    action: 'query',
+    titles: title,
+    prop: 'pageimages',
+    pithumbsize: '500',
+    format: 'json',
+    origin: '*',
+  });
+
+  const res = await fetch(`${WIKIPEDIA_API}?${params}`);
+  if (!res.ok) return '';
+  const data = await res.json();
+  const pages = data?.query?.pages ?? {};
+  const page = Object.values(pages)[0] as { thumbnail?: { source: string } } | undefined;
+  return page?.thumbnail?.source ?? '';
+}
+
 async function searchTMDB(title: string): Promise<{
   tmdb_id: number | null;
   thumbnail_url: string;
@@ -112,8 +130,11 @@ export async function GET(request: Request) {
     // 括弧付きの曖昧回避を除去（例: "アナザースカイ (テレビ番組)" → "アナザースカイ"）
     const title = rawTitle.replace(/\s*[（(][^）)]*[）)]\s*$/, '').trim();
 
-    const { tmdb_id, thumbnail_url, description: tmdbDesc } = await searchTMDB(title);
+    const { tmdb_id, thumbnail_url: tmdbThumb, description: tmdbDesc } = await searchTMDB(title);
     const description = tmdbDesc || (await fetchWikipediaDescription(rawTitle));
+
+    // TMDBに画像がなければWikipediaのページ画像で補完
+    const thumbnail_url = tmdbThumb || (await fetchWikipediaImage(rawTitle));
 
     // まず insert を試み、重複エラー(23505)なら upsert にフォールバック
     const { error } = await supabase.from('contents').insert({

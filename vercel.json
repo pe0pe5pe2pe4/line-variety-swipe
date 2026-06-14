@@ -4,6 +4,10 @@
     {
       "path": "/api/ingest",
       "schedule": "0 21 * * *"
+    },
+    {
+      "path": "/api/fix-images",
+      "schedule": "0 22 * * *"
     }
   ]
 }
