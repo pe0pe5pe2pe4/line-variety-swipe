@@ -72,7 +72,12 @@ export async function GET(request: Request) {
     .map((s: any) => s.content_id) ?? [];
 
   // 未スワイプを最大100件取得してスコアリング後に10件返す
-  let query = supabase.from('contents').select('*').limit(100);
+  // descriptionがある行を優先（descending nullsFirst:falseでNULLを後ろに）
+  let query = supabase
+    .from('contents')
+    .select('*')
+    .order('description', { ascending: false, nullsFirst: false })
+    .limit(100);
   if (swipedIds.length > 0) {
     query = query.not('id', 'in', `(${swipedIds.join(',')})`);
   }
@@ -80,7 +85,13 @@ export async function GET(request: Request) {
   const { data: candidates, error } = await query;
   if (error) return NextResponse.json({ error }, { status: 500 });
 
-  const list = (candidates ?? []) as ContentRow[];
+  // タイトル重複行は最初の1件のみ残す（descriptionがある行が先に来るため優先される）
+  const seenTitles = new Set<string>();
+  const list = ((candidates ?? []) as ContentRow[]).filter((c) => {
+    if (seenTitles.has(c.title)) return false;
+    seenTitles.add(c.title);
+    return true;
+  });
 
   // 右スワイプ履歴がなければ純粋なランダム順で返す
   if (likedIds.length === 0) {

@@ -5,27 +5,65 @@ import { searchTMDBShow } from '@/lib/tmdb';
 const WIKIPEDIA_API = 'https://ja.wikipedia.org/w/api.php';
 const BATCH = 20;
 
-async function searchWikipediaImage(title: string): Promise<string> {
-  const params = new URLSearchParams({
-    action: 'query',
-    titles: title,
-    prop: 'pageimages',
-    pithumbsize: '500',
-    format: 'json',
-    origin: '*',
-  });
+// センチネル値
+// 'not_found' = TMDB+Wikipedia失敗（YouTube未試行） → 次回のfix-imagesでYouTubeを試す
+// 'no_image'  = 全手段を試して失敗 → 再試行しない最終状態
+const FINAL_SENTINEL = 'no_image';
 
-  const res = await fetch(`${WIKIPEDIA_API}?${params}`);
-  if (!res.ok) return '';
-  const data = await res.json();
-  const pages = data?.query?.pages ?? {};
-  const page = Object.values(pages)[0] as { thumbnail?: { source: string } } | undefined;
-  return page?.thumbnail?.source ?? '';
+const BROADCASTER_LOGOS: Record<string, string> = {
+  ntv: 'https://www.ntv.co.jp/favicon.ico',
+  ex:  'https://www.tv-asahi.co.jp/favicon.ico',
+  tbs: 'https://www.tbs.co.jp/favicon.ico',
+  tx:  'https://www.tv-tokyo.co.jp/favicon.ico',
+  cx:  'https://www.fujitv.co.jp/favicon.ico',
+};
+
+async function searchWikipediaImage(title: string): Promise<string> {
+  try {
+    const params = new URLSearchParams({
+      action: 'query',
+      titles: title,
+      prop: 'pageimages',
+      pithumbsize: '500',
+      format: 'json',
+      origin: '*',
+    });
+    const res = await fetch(`${WIKIPEDIA_API}?${params}`);
+    if (!res.ok) return '';
+    const data = await res.json();
+    const pages = data?.query?.pages ?? {};
+    const page = Object.values(pages)[0] as { thumbnail?: { source: string } } | undefined;
+    return page?.thumbnail?.source ?? '';
+  } catch {
+    return '';
+  }
 }
 
-// TMDB・Wikipedia両方で画像が見つからなかった場合のセンチネル値
-// placehold.co を使うと次回のバッチでも再検出されてしまう無限ループになるため使用しない
-const NOT_FOUND_SENTINEL = 'not_found';
+async function searchYouTubeThumbnail(title: string): Promise<string> {
+  const key = process.env.YOUTUBE_API_KEY;
+  if (!key) return '';
+  try {
+    const params = new URLSearchParams({
+      part: 'snippet',
+      q: `${title} 公式`,
+      type: 'video',
+      maxResults: '1',
+      key,
+    });
+    const res = await fetch(`https://www.googleapis.com/youtube/v3/search?${params}`);
+    if (!res.ok) return '';
+    const data = await res.json();
+    const item = data?.items?.[0];
+    return (
+      item?.snippet?.thumbnails?.high?.url ??
+      item?.snippet?.thumbnails?.medium?.url ??
+      item?.snippet?.thumbnails?.default?.url ??
+      ''
+    );
+  } catch {
+    return '';
+  }
+}
 
 export async function GET(request: Request) {
   const authHeader = request.headers.get('authorization');
@@ -34,42 +72,72 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  // thumbnail_urlが空・null・プレースホルダー（placehold.co）の番組を取得
+  // 対象: null / 空文字 / placehold.co / not_found（YouTube未試行）
+  // no_image は対象外（全手段試済み、再試行しない）
   const { data: targets, error } = await supabase
     .from('contents')
-    .select('id, title')
-    .or('thumbnail_url.is.null,thumbnail_url.eq.,thumbnail_url.ilike.%placehold.co%')
+    .select('id, title, thumbnail_url, source')
+    .or('thumbnail_url.is.null,thumbnail_url.eq.,thumbnail_url.ilike.%placehold.co%,thumbnail_url.eq.not_found')
     .limit(BATCH);
 
   if (error) return NextResponse.json({ error }, { status: 500 });
   if (!targets || targets.length === 0) {
-    return NextResponse.json({ message: '修正対象なし・すべて解決済み', fixed: 0 });
+    const { count } = await supabase
+      .from('contents')
+      .select('id', { count: 'exact', head: true })
+      .eq('thumbnail_url', FINAL_SENTINEL);
+    return NextResponse.json({
+      message: '修正対象なし（null/placehold.co/not_found行なし）',
+      fixed: 0,
+      finalNoImage: count ?? 0,
+    });
   }
 
   let fixed = 0;
-  let fallback = 0;
-  const results: { title: string; source: string }[] = [];
+  let failed = 0;
+  const results: { title: string; imgSource: string; url: string }[] = [];
 
   for (const row of targets) {
     const title = row.title as string;
+    const rowSource = (row.source as string) ?? '';
+    const alreadyTriedBasic = row.thumbnail_url === 'not_found';
 
-    // 1. TMDBで検索
-    let url = (await searchTMDBShow(title)).thumbnail_url;
-    let source = 'tmdb';
+    let url = '';
+    let imgSource = '';
 
-    // 2. TMDBになければWikipediaで検索
-    if (!url) {
+    // Step 1: TMDB（not_foundの行はすでに試済みなのでスキップ）
+    if (!alreadyTriedBasic) {
+      const tmdb = await searchTMDBShow(title);
+      url = tmdb.thumbnail_url;
+      if (url) imgSource = 'tmdb';
+    }
+
+    // Step 2: Wikipedia（not_foundの行はすでに試済みなのでスキップ）
+    if (!url && !alreadyTriedBasic) {
       url = await searchWikipediaImage(title);
-      source = 'wikipedia';
+      if (url) imgSource = 'wikipedia';
     }
 
-    // 3. どちらも見つからなければセンチネル値をセット（再処理ループを防ぐ）
+    // Step 3: YouTube（YOUTUBE_API_KEY環境変数が必要）
     if (!url) {
-      url = NOT_FOUND_SENTINEL;
-      source = 'not_found';
-      fallback++;
+      url = await searchYouTubeThumbnail(title);
+      if (url) imgSource = 'youtube';
     }
 
+    // Step 4: 放送局ロゴ（source列に局コードが入っている場合のみ）
+    if (!url && BROADCASTER_LOGOS[rowSource]) {
+      url = BROADCASTER_LOGOS[rowSource];
+      imgSource = `broadcaster_logo(${rowSource})`;
+    }
+
+    // Step 5: 全手段失敗 → 最終センチネル（次回は再試行しない）
+    if (!url) {
+      url = FINAL_SENTINEL;
+      imgSource = 'no_image';
+      failed++;
+    }
+
+    // thumbnail_urlのみ更新。descriptionは絶対に触らない
     const { error: updateError } = await supabase
       .from('contents')
       .update({ thumbnail_url: url })
@@ -77,19 +145,20 @@ export async function GET(request: Request) {
 
     if (!updateError) {
       fixed++;
-      results.push({ title, source });
+      results.push({ title, imgSource, url });
     }
   }
 
   const remaining = await supabase
     .from('contents')
     .select('id', { count: 'exact', head: true })
-    .or('thumbnail_url.is.null,thumbnail_url.eq.,thumbnail_url.ilike.%placehold.co%');
+    .or('thumbnail_url.is.null,thumbnail_url.eq.,thumbnail_url.ilike.%placehold.co%,thumbnail_url.eq.not_found');
 
   return NextResponse.json({
     fixed,
-    fallback,
-    remaining: remaining.count ?? '不明',
+    failed,
+    remaining: remaining.count ?? 0,
+    hasYouTubeKey: !!process.env.YOUTUBE_API_KEY,
     results,
   });
 }

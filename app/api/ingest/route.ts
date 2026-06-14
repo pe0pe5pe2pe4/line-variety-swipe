@@ -14,6 +14,15 @@ const VARIETY_CATEGORIES = [
   'フジテレビのバラエティ番組',
 ];
 
+// カテゴリ → 放送局コード（fix-imagesで放送局ロゴを使うために保存）
+const CATEGORY_BROADCASTER: Record<string, string> = {
+  '日本テレビのバラエティ番組': 'ntv',
+  'テレビ朝日のバラエティ番組': 'ex',
+  'TBSのバラエティ番組': 'tbs',
+  'テレビ東京のバラエティ番組': 'tx',
+  'フジテレビのバラエティ番組': 'cx',
+};
+
 async function fetchCategoryTitles(category: string, continueToken?: string): Promise<{
   titles: string[];
   nextContinue?: string;
@@ -101,9 +110,23 @@ export async function GET(request: Request) {
   let skipped = 0;
   const errors: { title: string; error: string }[] = [];
 
+  const broadcaster = CATEGORY_BROADCASTER[category] ?? 'other';
+
   for (const rawTitle of titles.slice(0, BATCH_LIMIT)) {
     // 括弧付きの曖昧回避を除去（例: "アナザースカイ (テレビ番組)" → "アナザースカイ"）
     const title = rawTitle.replace(/\s*[（(][^）)]*[）)]\s*$/, '').trim();
+
+    // 重複チェック（unique constraintがないためselect→insertで重複を防ぐ）
+    const { data: existing } = await supabase
+      .from('contents')
+      .select('id')
+      .eq('title', title)
+      .limit(1);
+
+    if (existing && existing.length > 0) {
+      skipped++;
+      continue;
+    }
 
     const { tmdb_id, thumbnail_url: tmdbThumb, description: tmdbDesc } = await searchTMDBShow(title);
     const description = tmdbDesc || (await fetchWikipediaDescription(rawTitle));
@@ -111,22 +134,19 @@ export async function GET(request: Request) {
     // TMDBに画像がなければWikipediaのページ画像で補完
     const thumbnail_url = tmdbThumb || (await fetchWikipediaImage(rawTitle));
 
-    // まず insert を試み、重複エラー(23505)なら upsert にフォールバック
     const { error } = await supabase.from('contents').insert({
       title,
       description,
       thumbnail_url,
       tmdb_id,
-      source: 'wikipedia_tmdb',
+      source: broadcaster,
       vod_affiliate_url: '',
     });
 
     if (error) {
       if (error.code === '23505') {
-        // 重複は正常系（既に存在）
         skipped++;
       } else {
-        // 初回だけエラー詳細を記録
         if (errors.length < 3) errors.push({ title, error: JSON.stringify(error) });
         skipped++;
       }

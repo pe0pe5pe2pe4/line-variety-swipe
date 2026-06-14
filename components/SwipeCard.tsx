@@ -83,6 +83,7 @@ export default function SwipeCard({ content, onSwipe, isTop }: Props) {
             src={
               content.thumbnail_url &&
               content.thumbnail_url !== 'not_found' &&
+              content.thumbnail_url !== 'no_image' &&
               !content.thumbnail_url.includes('placehold.co')
                 ? content.thumbnail_url
                 : 'https://placehold.co/400x600/1a1a2e/ffffff?text=No+Image'
