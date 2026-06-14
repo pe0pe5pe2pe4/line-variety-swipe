@@ -19,6 +19,10 @@ export type Content = {
   genre?: string;
   // 推薦理由（recommend APIが付与・カードに小さく表示）
   recommend_reason?: string;
+  // 出演者（Wikipedia取得・詳細モーダルに表示）
+  cast_names?: string[] | null;
+  // クリック数（view_count）
+  view_count?: number;
 };
 
 const PLACEHOLDER_IMG = 'https://placehold.co/400x600/1a1a2e/ffffff?text=No+Image';

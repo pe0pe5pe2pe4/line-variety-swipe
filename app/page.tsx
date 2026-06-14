@@ -411,7 +411,7 @@ export default function Home() {
 
       {/* Detail modal */}
       {modalContent && (
-        <DetailModal content={modalContent} onClose={() => setModalContent(null)} />
+        <DetailModal content={modalContent} userId={userId} onClose={() => setModalContent(null)} />
       )}
 
       {/* Push 通知の許可ダイアログ（3回目以降の起動で表示） */}

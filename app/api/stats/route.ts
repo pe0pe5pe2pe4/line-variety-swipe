@@ -174,6 +174,59 @@ export async function GET(request: Request) {
     }
   }
 
+  // ── アフィリエイトクリック統計（全体）──
+  let affiliateClicks: {
+    total: number;
+    byService: { service: string; count: number }[];
+    topByRate: unknown[];
+  } = { total: 0, byService: [], topByRate: [] };
+  try {
+    const { data: clicks } = await supabase
+      .from('affiliate_clicks')
+      .select('content_id, service');
+    const rows = (clicks ?? []) as { content_id: string; service: string }[];
+    const serviceCount: Record<string, number> = {};
+    const clickByContent = new Map<string, number>();
+    for (const r of rows) {
+      serviceCount[r.service] = (serviceCount[r.service] ?? 0) + 1;
+      clickByContent.set(r.content_id, (clickByContent.get(r.content_id) ?? 0) + 1);
+    }
+    const byService = Object.entries(serviceCount)
+      .sort(([, a], [, b]) => b - a)
+      .map(([service, count]) => ({ service, count }));
+
+    // クリック率（クリック数 / スワイプ数）が高い番組 TOP5
+    let topByRate: unknown[] = [];
+    const clickedIds = [...clickByContent.keys()];
+    if (clickedIds.length > 0) {
+      const { data: sw } = await supabase
+        .from('swipes')
+        .select('content_id')
+        .in('content_id', clickedIds);
+      const swipeByContent = new Map<string, number>();
+      for (const s of (sw ?? []) as { content_id: string }[]) {
+        swipeByContent.set(s.content_id, (swipeByContent.get(s.content_id) ?? 0) + 1);
+      }
+      const { data: cc } = await supabase
+        .from('contents')
+        .select('id, title')
+        .in('id', clickedIds);
+      const titleMap = new Map(((cc ?? []) as { id: string; title: string }[]).map((c) => [c.id, c.title]));
+      topByRate = clickedIds
+        .map((id) => {
+          const clicks = clickByContent.get(id) ?? 0;
+          const swipes = swipeByContent.get(id) ?? 0;
+          const rate = swipes > 0 ? clicks / swipes : clicks;
+          return { id, title: titleMap.get(id) ?? '', clicks, swipes, rate: Math.round(rate * 100) / 100 };
+        })
+        .sort((a, b) => b.rate - a.rate)
+        .slice(0, 5);
+    }
+    affiliateClicks = { total: rows.length, byService, topByRate };
+  } catch {
+    affiliateClicks = { total: 0, byService: [], topByRate: [] };
+  }
+
   return NextResponse.json({
     totalSwipes,
     thisWeekCount,
@@ -182,5 +235,6 @@ export async function GET(request: Request) {
     stationRanking,
     weeklyTopPrograms,
     tastePercentile,
+    affiliateClicks,
   });
 }

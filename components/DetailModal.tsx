@@ -1,16 +1,19 @@
 'use client';
 import { Content, getDisplayDescription } from '@/lib/types';
+import { unextAffiliateUrl, trackClick } from '@/lib/affiliate';
 import ContentImage from './ContentImage';
 
 type Props = {
   content: Content | null;
+  userId?: string | null;
   onClose: () => void;
 };
 
-export default function DetailModal({ content, onClose }: Props) {
+export default function DetailModal({ content, userId, onClose }: Props) {
   if (!content) return null;
 
   const isYoutube = content.content_type === 'youtube';
+  const track = (service: string) => trackClick({ userId, contentId: content.id, service });
 
   // 「探す」系リンク（番組名で各サービスを検索・Tver番組は直接リンク）
   const tverUrl = content.content_type === 'tver' && content.tver_url
@@ -22,11 +25,12 @@ export default function DetailModal({ content, onClose }: Props) {
     ? content.youtube_url
     : `https://www.youtube.com/results?search_query=${encodeURIComponent(content.title)}`;
 
-  // U-NEXT / Hulu：vod_affiliate_url に値がある場合のみ表示（Netflixは永久に非表示）
-  // 注: スキーマ上アフィリエイト枠は vod_affiliate_url の1カラムのみ。
-  //     /api/set-affiliate で設定したサービスのURLがここに入る。
-  const affiliateUrl = content.vod_affiliate_url?.trim() ?? '';
-  const hasAffiliate = affiliateUrl.length > 0;
+  // U-NEXT：vod_affiliate_url 優先、無ければアフィリエイトIDから動的生成（TASK4）
+  const unextUrl = unextAffiliateUrl(content.title, content.vod_affiliate_url);
+  const hasUnext = !!unextUrl;
+  // Hulu：明示的な vod_affiliate_url がある場合のみ（Netflixは永久に非表示）
+  const huluUrl = content.vod_affiliate_url?.trim() ?? '';
+  const hasHulu = huluUrl.length > 0;
 
   return (
     <div
@@ -83,34 +87,45 @@ export default function DetailModal({ content, onClose }: Props) {
               <p className="text-sm text-gray-500 mt-2 leading-relaxed">{getDisplayDescription(content)}</p>
             ) : null}
 
+            {content.cast_names && content.cast_names.length > 0 && (
+              <p className="text-xs text-gray-500 mt-2">
+                <span className="font-bold text-gray-700">出演：</span>
+                {content.cast_names.join('、')}
+              </p>
+            )}
+
             {/* Platform buttons：すべて「○○で探す」に統一 */}
             <div className="flex flex-col gap-3 mt-5 pb-6">
 
-              {/* U-NEXT / Hulu（収益化のため最上部・vod_affiliate_url がある場合のみ・Netflixは永久非表示） */}
-              {hasAffiliate && (
-                <>
-                  <a
-                    href={affiliateUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center justify-center gap-2 py-3.5 bg-purple-600 text-white rounded-2xl font-bold text-sm active:opacity-80 transition-opacity"
-                  >
-                    <span>🎬</span> U-NEXTで探す
-                  </a>
-                  <a
-                    href={affiliateUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center justify-center gap-2 py-3.5 bg-emerald-600 text-white rounded-2xl font-bold text-sm active:opacity-80 transition-opacity"
-                  >
-                    <span>🟢</span> Huluで探す
-                  </a>
-                </>
+              {/* U-NEXT（収益化のため最上部・動的アフィリエイト生成対応） */}
+              {hasUnext && (
+                <a
+                  href={unextUrl!}
+                  onClick={() => track('unext')}
+                  target="_blank"
+                  rel="noopener noreferrer sponsored"
+                  className="flex items-center justify-center gap-2 py-3.5 bg-purple-600 text-white rounded-2xl font-bold text-sm active:opacity-80 transition-opacity"
+                >
+                  <span>🎬</span> U-NEXTで探す
+                </a>
+              )}
+              {/* Hulu（明示的な vod_affiliate_url がある場合のみ・Netflixは永久非表示） */}
+              {hasHulu && (
+                <a
+                  href={huluUrl}
+                  onClick={() => track('hulu')}
+                  target="_blank"
+                  rel="noopener noreferrer sponsored"
+                  className="flex items-center justify-center gap-2 py-3.5 bg-emerald-600 text-white rounded-2xl font-bold text-sm active:opacity-80 transition-opacity"
+                >
+                  <span>🟢</span> Huluで探す
+                </a>
               )}
 
               {/* TVer（常に表示） */}
               <a
                 href={tverUrl}
+                onClick={() => track('tver')}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center justify-center gap-2 py-3.5 bg-blue-500 text-white rounded-2xl font-bold text-sm active:opacity-80 transition-opacity"
@@ -121,6 +136,7 @@ export default function DetailModal({ content, onClose }: Props) {
               {/* ABEMA（常に表示） */}
               <a
                 href={abemaUrl}
+                onClick={() => track('abema')}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center justify-center gap-2 py-3.5 bg-cyan-500 text-white rounded-2xl font-bold text-sm active:opacity-80 transition-opacity"
@@ -131,6 +147,7 @@ export default function DetailModal({ content, onClose }: Props) {
               {/* YouTube（常に表示・youtube動画は直接URLへ） */}
               <a
                 href={youtubeUrl}
+                onClick={() => track('youtube')}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center justify-center gap-2 py-3.5 bg-red-500 text-white rounded-2xl font-bold text-sm active:opacity-80 transition-opacity"
