@@ -31,3 +31,9 @@ export function inferGenre(c: GenreSource): string {
   }
   return c.content_type === 'youtube' ? 'YouTube' : 'バラエティ';
 }
+
+/** DBに保存済みの genre があればそれを優先、無ければ推定する */
+export function resolveGenre(c: GenreSource & { genre?: string | null }): string {
+  const stored = (c.genre ?? '').trim();
+  return stored || inferGenre(c);
+}

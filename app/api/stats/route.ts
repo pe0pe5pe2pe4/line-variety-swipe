@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
-import { inferGenre } from '@/lib/genre';
+import { resolveGenre } from '@/lib/genre';
 
 type SwipeRow = { content_id: string; direction: string; created_at: string | null };
 type ContentRow = {
@@ -10,6 +10,7 @@ type ContentRow = {
   channel_name?: string | null;
   content_type?: string | null;
   description?: string | null;
+  genre?: string | null;
 };
 
 // マイページ統計：総スワイプ数 / 好きな番組TOP5 / ジャンル・放送局ランキング / 今週のスワイプ数
@@ -56,7 +57,7 @@ export async function GET(request: Request) {
   if (likedIds.length > 0) {
     const { data: contents } = await supabase
       .from('contents')
-      .select('id, title, thumbnail_url, channel_name, content_type, description')
+      .select('id, title, thumbnail_url, channel_name, content_type, description, genre')
       .in('id', likedIds);
 
     const cmap = new Map(
@@ -87,7 +88,7 @@ export async function GET(request: Request) {
     for (const [id, count] of rightCounts) {
       const c = cmap.get(id);
       if (!c) continue;
-      const g = inferGenre(c);
+      const g = resolveGenre(c);
       genreCount[g] = (genreCount[g] ?? 0) + count;
       const st = c.channel_name?.trim();
       if (st) stationCount[st] = (stationCount[st] ?? 0) + count;

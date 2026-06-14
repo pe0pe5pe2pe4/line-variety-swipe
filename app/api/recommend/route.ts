@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import type { Content } from '@/lib/types';
-import { inferGenre } from '@/lib/genre';
+import { inferGenre, resolveGenre } from '@/lib/genre';
 
 // ───────────────────────────────────────────────
 // キーワード抽出ユーティリティ
@@ -49,7 +49,7 @@ function extractSearchKeywords(
 // ───────────────────────────────────────────────
 // ユーザー嗜好プロファイル（重み付け：ジャンル3 / 放送局2 / キーワード1）
 // ───────────────────────────────────────────────
-type LikedRow = { title: string; description?: string | null; channel_name?: string | null; content_type?: string | null };
+type LikedRow = { title: string; description?: string | null; channel_name?: string | null; content_type?: string | null; genre?: string | null };
 
 type Profile = {
   genreWeights: Record<string, number>;
@@ -75,14 +75,14 @@ function buildProfile(liked: LikedRow[], disliked: LikedRow[]): Profile {
   const genreWeights: Record<string, number> = {};
   const stationWeights: Record<string, number> = {};
   for (const c of liked) {
-    const g = inferGenre(c);
+    const g = resolveGenre(c);
     genreWeights[g] = (genreWeights[g] ?? 0) + 1;
     const st = c.channel_name?.trim();
     if (st) stationWeights[st] = (stationWeights[st] ?? 0) + 1;
   }
   const dislikedGenres: Record<string, number> = {};
   for (const c of disliked) {
-    const g = inferGenre(c);
+    const g = resolveGenre(c);
     dislikedGenres[g] = (dislikedGenres[g] ?? 0) + 1;
   }
   return {
@@ -101,7 +101,7 @@ function hasPreference(p: Profile): boolean {
 
 /** ジャンル3 / 放送局2 / キーワード1 で重み付けし、嫌いなジャンルは減点 */
 function scoreWithProfile(c: Content, p: Profile): number {
-  const genre = inferGenre(c);
+  const genre = resolveGenre(c);
   let score = 0;
   score += W_GENRE * (p.genreWeights[genre] ?? 0);
   const st = c.channel_name?.trim();
@@ -115,7 +115,7 @@ function scoreWithProfile(c: Content, p: Profile): number {
 
 /** 推薦理由（トップ嗜好に一致する場合のみ付与） */
 function reasonFor(c: Content, p: Profile): string | undefined {
-  const genre = inferGenre(c);
+  const genre = resolveGenre(c);
   if (p.topGenre && genre === p.topGenre) return `${p.topGenre}が好きそうなので`;
   const st = c.channel_name?.trim();
   if (p.topStation && st === p.topStation) return `${p.topStation}をよく見るので`;
@@ -455,10 +455,10 @@ export async function GET(request: Request) {
   // 右スワイプ＝好き / 左スワイプ＝嫌い の詳細を取得してプロファイル化
   const [likedRes, dislikedRes] = await Promise.all([
     rightSwipeIds.length > 0
-      ? supabase.from('contents').select('title, description, channel_name, content_type').in('id', rightSwipeIds)
+      ? supabase.from('contents').select('title, description, channel_name, content_type, genre').in('id', rightSwipeIds)
       : Promise.resolve({ data: [] as LikedRow[] }),
     leftSwipeIds.length > 0
-      ? supabase.from('contents').select('title, description, channel_name, content_type').in('id', leftSwipeIds)
+      ? supabase.from('contents').select('title, description, channel_name, content_type, genre').in('id', leftSwipeIds)
       : Promise.resolve({ data: [] as LikedRow[] }),
   ]);
 
@@ -503,7 +503,7 @@ export async function GET(request: Request) {
   const mixed = mixContent(finalTvShows, ytVideos);
   const result = mixed.map((c) => ({
     ...c,
-    genre: inferGenre(c),
+    genre: resolveGenre(c),
     recommend_reason: reasonFor(c, profile),
   }));
 
