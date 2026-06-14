@@ -1,102 +1,75 @@
 import { NextResponse } from 'next/server';
 
 const TMDB_BASE = 'https://api.themoviedb.org/3';
-const WIKIPEDIA_API = 'https://ja.wikipedia.org/w/api.php';
+const WIKI_API = 'https://ja.wikipedia.org/w/api.php';
 
-// TMDB_API_KEYがv3キー（短い文字列）かv4 Bearerトークン（JWT）か判定
-function buildTMDBHeaders(key: string): HeadersInit {
-  if (key.startsWith('eyJ')) {
-    // v4 Bearer token
-    return { Authorization: `Bearer ${key}` };
+async function safeFetch(url: string, options?: RequestInit): Promise<unknown> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    const res = await fetch(url, { ...options, signal: controller.signal });
+    clearTimeout(timer);
+    const text = await res.text();
+    try {
+      return { status: res.status, body: JSON.parse(text) };
+    } catch {
+      return { status: res.status, body: text.slice(0, 200) };
+    }
+  } catch (e) {
+    return { error: String(e) };
   }
-  // v3 API key → ヘッダー不要（クエリパラメータで渡す）
-  return {};
-}
-
-function buildTMDBUrl(endpoint: string, key: string, params: Record<string, string>): string {
-  const p = new URLSearchParams(params);
-  if (!key.startsWith('eyJ')) {
-    p.set('api_key', key);
-  }
-  return `${TMDB_BASE}${endpoint}?${p}`;
 }
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const title = searchParams.get('title');
-
-  if (!title) {
-    return NextResponse.json({ error: 'title query param required. e.g. /api/debug-images?title=アメトーーク' }, { status: 400 });
-  }
+  const title = searchParams.get('title') ?? 'アメトーーク';
 
   const tmdbKey = process.env.TMDB_API_KEY ?? '';
-  const keyType = tmdbKey.startsWith('eyJ') ? 'v4 Bearer token' : tmdbKey ? 'v3 api_key' : 'NOT SET';
+  const keySet = tmdbKey.length > 0;
+  const keyType = !keySet ? 'NOT SET' : tmdbKey.startsWith('eyJ') ? 'v4 Bearer (JWT)' : 'v3 api_key';
 
-  // --- TMDB: language=ja-JP ---
-  const tmdbUrlJa = buildTMDBUrl('/search/tv', tmdbKey, { query: title, language: 'ja-JP' });
-  const tmdbResJa = tmdbKey
-    ? await fetch(tmdbUrlJa, { headers: buildTMDBHeaders(tmdbKey) })
-    : null;
-  const tmdbDataJa = tmdbResJa ? await tmdbResJa.json() : { error: 'TMDB_API_KEY not set' };
+  // TMDB: v3とv4どちらの形式でも動くよう両方試す
+  let tmdbResult: unknown = { skipped: 'TMDB_API_KEY not set' };
+  if (keySet) {
+    const isJWT = tmdbKey.startsWith('eyJ');
 
-  // --- TMDB: language=ja-JP + region=JP ---
-  const tmdbUrlJaJp = buildTMDBUrl('/search/tv', tmdbKey, { query: title, language: 'ja-JP', region: 'JP' });
-  const tmdbResJaJp = tmdbKey
-    ? await fetch(tmdbUrlJaJp, { headers: buildTMDBHeaders(tmdbKey) })
-    : null;
-  const tmdbDataJaJp = tmdbResJaJp ? await tmdbResJaJp.json() : null;
+    if (isJWT) {
+      // v4: Authorization: Bearer ヘッダー
+      const url = `${TMDB_BASE}/search/tv?query=${encodeURIComponent(title)}&language=ja-JP`;
+      tmdbResult = await safeFetch(url, {
+        headers: { Authorization: `Bearer ${tmdbKey}` },
+      });
+    } else {
+      // v3: api_key クエリパラメータ
+      const url = `${TMDB_BASE}/search/tv?api_key=${tmdbKey}&query=${encodeURIComponent(title)}&language=ja-JP`;
+      tmdbResult = await safeFetch(url);
+    }
+  }
 
-  // --- TMDB: 英語クエリ（タイトルの英訳試行なし、そのまま）---
-  const tmdbUrlEn = buildTMDBUrl('/search/tv', tmdbKey, { query: title });
-  const tmdbResEn = tmdbKey
-    ? await fetch(tmdbUrlEn, { headers: buildTMDBHeaders(tmdbKey) })
-    : null;
-  const tmdbDataEn = tmdbResEn ? await tmdbResEn.json() : null;
+  // Wikipedia pageimages
+  const wikiUrl =
+    `${WIKI_API}?action=query&titles=${encodeURIComponent(title)}&prop=pageimages&pithumbsize=500&format=json&origin=*`;
+  const wikiResult = await safeFetch(wikiUrl);
 
-  // --- Wikipedia pageimages ---
-  const wikiParams = new URLSearchParams({
-    action: 'query',
-    titles: title,
-    prop: 'pageimages',
-    pithumbsize: '500',
-    format: 'json',
-    origin: '*',
-  });
-  const wikiRes = await fetch(`${WIKIPEDIA_API}?${wikiParams}`);
-  const wikiData = await wikiRes.json();
-  const wikiPages = wikiData?.query?.pages ?? {};
-  const wikiPage = Object.values(wikiPages)[0] as Record<string, unknown> | undefined;
+  // 結果をわかりやすく整形
+  const tmdbBody = (tmdbResult as { body?: { results?: { name: string; poster_path: string | null }[]; total_results?: number; status_message?: string } })?.body;
+  const wikiBody = (wikiResult as { body?: { query?: { pages?: Record<string, { thumbnail?: { source: string } }> } } })?.body;
+  const wikiPages = wikiBody?.query?.pages ?? {};
+  const wikiPage = Object.values(wikiPages)[0];
 
   return NextResponse.json({
     title,
-    tmdbKeyType: keyType,
-    tmdbKeyPrefix: tmdbKey ? tmdbKey.slice(0, 8) + '...' : 'NOT SET',
-    tmdb_ja: {
-      url: tmdbUrlJa,
-      status: tmdbResJa?.status,
-      totalResults: tmdbDataJa?.total_results,
-      firstResult: tmdbDataJa?.results?.[0]
-        ? {
-            name: tmdbDataJa.results[0].name,
-            original_name: tmdbDataJa.results[0].original_name,
-            poster_path: tmdbDataJa.results[0].poster_path,
-            backdrop_path: tmdbDataJa.results[0].backdrop_path,
-          }
+    env: { TMDB_API_KEY: keyType },
+    tmdb: {
+      raw_status: (tmdbResult as { status?: number })?.status,
+      total_results: tmdbBody?.total_results,
+      error: tmdbBody?.status_message ?? null,
+      first_hit: tmdbBody?.results?.[0]
+        ? { name: tmdbBody.results[0].name, poster_path: tmdbBody.results[0].poster_path }
         : null,
-      error: tmdbDataJa?.errors ?? tmdbDataJa?.status_message ?? null,
-    },
-    tmdb_ja_jp: {
-      totalResults: tmdbDataJaJp?.total_results,
-      firstResult: tmdbDataJaJp?.results?.[0]?.name ?? null,
-    },
-    tmdb_no_lang: {
-      totalResults: tmdbDataEn?.total_results,
-      firstResult: tmdbDataEn?.results?.[0]?.name ?? null,
     },
     wikipedia: {
-      pageId: wikiPage?.pageid,
-      title: wikiPage?.title,
-      thumbnail: wikiPage?.thumbnail ?? null,
+      thumbnail: wikiPage?.thumbnail?.source ?? null,
     },
   });
 }
