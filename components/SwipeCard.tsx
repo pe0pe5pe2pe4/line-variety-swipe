@@ -3,7 +3,9 @@ import { useRef } from 'react';
 import { useSpring, animated } from '@react-spring/web';
 import { useDrag } from '@use-gesture/react';
 import { Content } from '@/lib/types';
+import { inferGenre } from '@/lib/genre';
 import ContentImage from './ContentImage';
+import ShareButton from './ShareButton';
 
 type Props = {
   content: Content;
@@ -72,6 +74,11 @@ export default function SwipeCard({ content, onSwipe, onShowDetail, isTop }: Pro
   const nowOpacity  = y.to((v) => Math.max(0, Math.min(1, -v / SWIPE_THRESHOLD)));
 
   const isYoutube = content.content_type === 'youtube';
+  const genre = content.genre ?? inferGenre(content);
+  const station = content.channel_name?.trim();
+  const meta = [content.episode_number, content.broadcast_date]
+    .filter((v) => v && v !== 'unknown')
+    .join(' • ');
 
   return (
     <animated.div
@@ -91,92 +98,128 @@ export default function SwipeCard({ content, onSwipe, onShowDetail, isTop }: Pro
       onContextMenu={(e) => { e.preventDefault(); if (isTop && !gone.current) onShowDetail(); }}
       className="will-change-transform"
     >
-      <div className="w-full h-full bg-white rounded-3xl shadow-2xl overflow-hidden flex flex-col">
-        {/* Image — 全カード共通の固定比率（3:4 ポスター）で統一 */}
-        <div className="relative flex-shrink-0 h-[60%] bg-gray-100">
-          <ContentImage
-            src={content.thumbnail_url}
-            alt={content.title}
-            channelName={content.channel_name}
-            eager={isTop}
-          />
-          {/* Gradient overlay */}
-          <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+      {/* TikTok風 縦型フルスクリーンカード：画像全面 + 下部グラデにテキスト */}
+      <div className="relative w-full h-full rounded-3xl shadow-2xl overflow-hidden bg-black">
+        {/* フルスクリーンサムネイル（object-cover） */}
+        <ContentImage
+          src={content.thumbnail_url}
+          alt={content.title}
+          channelName={content.channel_name}
+          eager={isTop}
+        />
 
-          {/* YouTube play icon */}
-          {isYoutube && (
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="w-16 h-16 flex items-center justify-center bg-red-600/80 rounded-full">
-                <span className="text-white text-3xl ml-1">▶</span>
-              </div>
+        {/* 上下グラデーションオーバーレイ */}
+        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/10 to-black/40 pointer-events-none" />
+
+        {/* 推薦理由（あれば左上に小さく表示） */}
+        {content.recommend_reason && (
+          <div className="absolute top-4 left-4 right-4 pointer-events-none">
+            <span className="inline-block bg-indigo-500/85 text-white text-xs font-bold px-3 py-1 rounded-full backdrop-blur-sm">
+              💡 {content.recommend_reason}
+            </span>
+          </div>
+        )}
+
+        {/* YouTube play icon（中央） */}
+        {isYoutube && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div className="w-20 h-20 flex items-center justify-center bg-red-600/80 rounded-full shadow-lg">
+              <span className="text-white text-4xl ml-1">▶</span>
             </div>
-          )}
+          </div>
+        )}
 
-          {/* LIKE badge */}
-          <animated.div
-            style={{ opacity: likeOpacity }}
-            className="absolute top-6 left-6 border-4 border-emerald-400 text-emerald-400 font-black text-3xl px-3 py-1 rounded-xl rotate-[-20deg] tracking-widest"
-          >
-            LIKE
-          </animated.div>
+        {/* LIKE badge（大） */}
+        <animated.div
+          style={{ opacity: likeOpacity }}
+          className="absolute top-10 left-6 border-[6px] border-emerald-400 text-emerald-400 font-black text-5xl px-4 py-1.5 rounded-2xl rotate-[-20deg] tracking-widest pointer-events-none"
+        >
+          LIKE
+        </animated.div>
 
-          {/* NOPE badge */}
-          <animated.div
-            style={{ opacity: nopeOpacity }}
-            className="absolute top-6 right-6 border-4 border-rose-400 text-rose-400 font-black text-3xl px-3 py-1 rounded-xl rotate-[20deg] tracking-widest"
-          >
-            NOPE
-          </animated.div>
+        {/* NOPE badge（大） */}
+        <animated.div
+          style={{ opacity: nopeOpacity }}
+          className="absolute top-10 right-6 border-[6px] border-rose-400 text-rose-400 font-black text-5xl px-4 py-1.5 rounded-2xl rotate-[20deg] tracking-widest pointer-events-none"
+        >
+          NOPE
+        </animated.div>
 
-          {/* NOW badge (上スワイプ) */}
-          <animated.div
-            style={{ opacity: nowOpacity }}
-            className="absolute top-6 left-1/2 -translate-x-1/2 border-4 border-sky-400 text-sky-400 font-black text-2xl px-3 py-1 rounded-xl tracking-widest whitespace-nowrap"
-          >
-            今すぐ見る
-          </animated.div>
-        </div>
+        {/* NOW badge（上スワイプ・大） */}
+        <animated.div
+          style={{ opacity: nowOpacity }}
+          className="absolute top-1/3 left-1/2 -translate-x-1/2 border-[6px] border-sky-400 text-sky-400 font-black text-4xl px-4 py-1.5 rounded-2xl tracking-widest whitespace-nowrap pointer-events-none"
+        >
+          今すぐ見る
+        </animated.div>
 
-        {/* Info */}
-        <div className="flex flex-col flex-1 p-4 gap-1.5">
-          <h2 className="text-xl font-bold text-gray-900 leading-tight line-clamp-2">{content.title}</h2>
-          {(content.episode_number || (content.broadcast_date && content.broadcast_date !== 'unknown')) && (
-            <p className="text-xs text-indigo-400 truncate">
-              {[content.episode_number, content.broadcast_date].filter(
-                (v) => v && v !== 'unknown'
-              ).join(' • ')}
-            </p>
-          )}
-          <p className="text-sm text-gray-500 line-clamp-2 flex-1">{content.description}</p>
+        {/* 下部 情報オーバーレイ */}
+        <div className="absolute inset-x-0 bottom-0 p-5 pb-6 flex flex-col gap-2">
+          {/* ジャンル / 放送局タグ */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-bold text-white bg-indigo-500/90 px-2.5 py-0.5 rounded-full">
+              #{genre}
+            </span>
+            {isYoutube ? (
+              <span className="text-xs font-bold text-white bg-red-600/90 px-2.5 py-0.5 rounded-full">
+                ▶ YouTube
+              </span>
+            ) : (
+              station && (
+                <span className="text-xs font-bold text-white bg-white/20 px-2.5 py-0.5 rounded-full backdrop-blur-sm">
+                  📺 {station}
+                </span>
+              )
+            )}
+          </div>
+
+          {/* 番組名（大・白・太字） */}
+          <h2 className="text-white text-2xl font-black leading-tight line-clamp-2 drop-shadow-lg">
+            {content.title}
+          </h2>
+
+          {/* チャンネル名（YouTube）/ 放送回・日付 */}
+          {isYoutube && station ? (
+            <p className="text-slate-200 text-sm font-medium truncate">{station}</p>
+          ) : meta ? (
+            <p className="text-slate-200 text-xs truncate">{meta}</p>
+          ) : null}
+
+          {content.description ? (
+            <p className="text-slate-300 text-sm line-clamp-2">{content.description}</p>
+          ) : null}
 
           {/* Action buttons */}
-          <div className="flex justify-center items-center gap-5 pt-1">
+          <div className="flex justify-center items-center gap-6 pt-2">
             {/* NOPE */}
             <button
               onPointerDown={(e) => { e.stopPropagation(); onSwipe('left'); }}
-              className="w-13 h-13 w-[52px] h-[52px] flex items-center justify-center rounded-full border-2 border-rose-300 text-rose-400 text-2xl shadow-md hover:bg-rose-50 active:scale-95 transition-all"
+              className="w-[56px] h-[56px] flex items-center justify-center rounded-full bg-white/90 text-rose-500 text-2xl shadow-lg active:scale-90 transition-transform"
               aria-label="Skip"
             >
               ✕
             </button>
 
-            {/* NOW (上スワイプ = 今すぐ見る) */}
+            {/* NOW（上スワイプ = 今すぐ見る） */}
             <button
               onPointerDown={(e) => { e.stopPropagation(); onSwipe('up'); }}
-              className="w-[44px] h-[44px] flex items-center justify-center rounded-full border-2 border-sky-300 text-sky-400 text-lg shadow-md hover:bg-sky-50 active:scale-95 transition-all"
+              className="w-[48px] h-[48px] flex items-center justify-center rounded-full bg-sky-500 text-white text-lg shadow-lg active:scale-90 transition-transform"
               aria-label="Watch Now"
             >
               ▶
             </button>
 
-            {/* LIKE (あとで見る) */}
+            {/* LIKE（あとで見る） */}
             <button
               onPointerDown={(e) => { e.stopPropagation(); onSwipe('right'); }}
-              className="w-[52px] h-[52px] flex items-center justify-center rounded-full border-2 border-emerald-300 text-emerald-500 text-2xl shadow-md hover:bg-emerald-50 active:scale-95 transition-all"
+              className="w-[56px] h-[56px] flex items-center justify-center rounded-full bg-emerald-500 text-white text-2xl shadow-lg active:scale-90 transition-transform"
               aria-label="Like"
             >
               ♥
             </button>
+
+            {/* SHARE（シェア） */}
+            <ShareButton content={content} />
           </div>
         </div>
       </div>

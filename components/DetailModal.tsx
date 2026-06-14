@@ -12,18 +12,17 @@ export default function DetailModal({ content, onClose }: Props) {
 
   const isYoutube = content.content_type === 'youtube';
 
-  // ① TVer（常に表示）
+  // 「探す」系リンク（番組名で各サービスを検索）
   const tverUrl = `https://tver.jp/search/#${encodeURIComponent(content.title)}`;
-
-  // ② YouTube（content_type === 'youtube' のみ）
-  const youtubeUrl = content.youtube_url
-    ?? `https://www.youtube.com/results?search_query=${encodeURIComponent(content.title)}`;
-
-  // ③ ABEMA（常に表示）
   const abemaUrl = `https://abema.tv/search?q=${encodeURIComponent(content.title)}`;
+  // YouTube: youtube動画なら直接URL、それ以外は検索
+  const youtubeUrl = isYoutube && content.youtube_url
+    ? content.youtube_url
+    : `https://www.youtube.com/results?search_query=${encodeURIComponent(content.title)}`;
 
-  // ④⑤⑥ U-NEXT / Hulu / Amazon（vod_affiliate_urlが設定されている場合のみ）
-  // 現時点は空なので非表示。後からアフィリエイトリンクを差し込むと自動表示される
+  // U-NEXT / Hulu：vod_affiliate_url に値がある場合のみ表示（Netflixは永久に非表示）
+  // 注: スキーマ上アフィリエイト枠は vod_affiliate_url の1カラムのみ。
+  //     /api/set-affiliate で設定したサービスのURLがここに入る。
   const affiliateUrl = content.vod_affiliate_url?.trim() ?? '';
   const hasAffiliate = affiliateUrl.length > 0;
 
@@ -82,55 +81,60 @@ export default function DetailModal({ content, onClose }: Props) {
               <p className="text-sm text-gray-500 mt-2 leading-relaxed">{content.description}</p>
             ) : null}
 
-            {/* Platform buttons */}
+            {/* Platform buttons：すべて「○○で探す」に統一 */}
             <div className="flex flex-col gap-3 mt-5 pb-6">
 
-              {/* ① TVer（常に表示・無料コンテンツ最優先） */}
+              {/* TVer（常に表示） */}
               <a
                 href={tverUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center justify-center gap-2 py-3.5 bg-blue-500 text-white rounded-2xl font-bold text-sm active:opacity-80 transition-opacity"
               >
-                <span>📺</span> TVer で見る（無料）
+                <span>📺</span> TVerで探す
               </a>
 
-              {/* ② YouTube（youtube コンテンツのみ） */}
-              {isYoutube && (
-                <a
-                  href={youtubeUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center justify-center gap-2 py-3.5 bg-red-500 text-white rounded-2xl font-bold text-sm active:opacity-80 transition-opacity"
-                >
-                  <span className="text-lg">▶</span> YouTube で見る（無料）
-                </a>
-              )}
-
-              {/* ③ ABEMA（常に表示・無料コンテンツ多数） */}
+              {/* ABEMA（常に表示） */}
               <a
                 href={abemaUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center justify-center gap-2 py-3.5 bg-cyan-500 text-white rounded-2xl font-bold text-sm active:opacity-80 transition-opacity"
               >
-                <span>📡</span> ABEMA で見る（一部無料）
+                <span>📡</span> ABEMAで探す
               </a>
 
-              {/* ④ U-NEXT（アフィリエイトリンクが設定された場合のみ） */}
-              {hasAffiliate && (
-                <a
-                  href={affiliateUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center justify-center gap-2 py-3.5 bg-purple-600 text-white rounded-2xl font-bold text-sm active:opacity-80 transition-opacity"
-                >
-                  <span>🎬</span> U-NEXT で見る
-                </a>
-              )}
+              {/* YouTube（常に表示・youtube動画は直接URLへ） */}
+              <a
+                href={youtubeUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-center gap-2 py-3.5 bg-red-500 text-white rounded-2xl font-bold text-sm active:opacity-80 transition-opacity"
+              >
+                <span className="text-lg">▶</span> YouTubeで探す
+              </a>
 
-              {/* ⑤ Hulu・⑥ Amazon Prime は個別カラムが追加されたら表示 */}
-              {/* Netflix はアフィリエイトプログラムなし → 非表示 */}
+              {/* U-NEXT / Hulu（vod_affiliate_url がある場合のみ・Netflixは永久非表示） */}
+              {hasAffiliate && (
+                <>
+                  <a
+                    href={affiliateUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center justify-center gap-2 py-3.5 bg-purple-600 text-white rounded-2xl font-bold text-sm active:opacity-80 transition-opacity"
+                  >
+                    <span>🎬</span> U-NEXTで探す
+                  </a>
+                  <a
+                    href={affiliateUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center justify-center gap-2 py-3.5 bg-emerald-600 text-white rounded-2xl font-bold text-sm active:opacity-80 transition-opacity"
+                  >
+                    <span>🟢</span> Huluで探す
+                  </a>
+                </>
+              )}
             </div>
           </div>
         </div>

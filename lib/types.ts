@@ -12,6 +12,10 @@ export type Content = {
   episode_number?: string;
   episode_title?: string;
   broadcast_date?: string;
+  // 推定ジャンル（recommend APIが付与）
+  genre?: string;
+  // 推薦理由（recommend APIが付与・カードに小さく表示）
+  recommend_reason?: string;
 };
 
 const PLACEHOLDER_IMG = 'https://placehold.co/400x600/1a1a2e/ffffff?text=No+Image';

@@ -4,6 +4,7 @@ import SwipeCard from '@/components/SwipeCard';
 import Onboarding from '@/components/Onboarding';
 import DetailModal from '@/components/DetailModal';
 import WatchLaterList from '@/components/WatchLaterList';
+import MyPage, { Stats } from '@/components/MyPage';
 import { Content } from '@/lib/types';
 
 const DUMMY_USER_ID = 'test-user-001';
@@ -14,7 +15,7 @@ const LOW_WATERMARK = 6;
 // exclude クエリに載せる直近表示IDの上限（URL肥大を防ぐ）
 const EXCLUDE_LIMIT = 200;
 
-type Tab = 'swipe' | 'watchlater';
+type Tab = 'swipe' | 'watchlater' | 'mypage';
 
 export default function Home() {
   // userId: null = LIFF初期化中（ローディング表示）
@@ -26,6 +27,8 @@ export default function Home() {
   const [modalContent, setModalContent] = useState<Content | null>(null);
   const [watchLater, setWatchLater] = useState<Content[]>([]);
   const [watchLaterLoading, setWatchLaterLoading] = useState(false);
+  const [stats, setStats] = useState<Stats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(false);
   // これ以上取得できる番組が無くなったか（空状態の表示判定に使用）
   const [reachedEnd, setReachedEnd] = useState(false);
 
@@ -142,6 +145,19 @@ export default function Home() {
       .catch(() => setWatchLaterLoading(false));
   }, [activeTab, userId]);
 
+  // マイページ統計をロード（タブ切替時に最新化）
+  useEffect(() => {
+    if (activeTab !== 'mypage' || !userId) return;
+    setStatsLoading(true);
+    fetch(`/api/stats?user_id=${userId}`)
+      .then((r) => r.json())
+      .then((data) => {
+        setStats(data && !data.error ? (data as Stats) : null);
+        setStatsLoading(false);
+      })
+      .catch(() => setStatsLoading(false));
+  }, [activeTab, userId]);
+
   const handleSwipe = (direction: 'left' | 'right' | 'up', content: Content) => {
     setContents((prev) => {
       const next = prev.filter((c) => c.id !== content.id);
@@ -230,7 +246,7 @@ export default function Home() {
                   <p className="text-slate-400 text-xs mt-1">タップで詳細 / 上スワイプで今すぐ見る</p>
                 </div>
 
-                <div className="relative w-full max-w-sm" style={{ height: '520px' }}>
+                <div className="relative w-full max-w-sm" style={{ height: 'min(640px, calc(100dvh - 180px))' }}>
                   {visibleCards.map((content, i) => {
                     const isTop = i === 0;
                     const scale = 1 - i * 0.04;
@@ -279,6 +295,17 @@ export default function Home() {
             )}
           </div>
         )}
+
+        {/* Tab: My Page (統計) */}
+        {activeTab === 'mypage' && (
+          <div className="flex flex-col flex-1 pt-6">
+            <div className="w-full max-w-sm mx-auto px-4 mb-4">
+              <h1 className="text-white text-2xl font-black tracking-tight">マイページ</h1>
+              <p className="text-slate-400 text-xs mt-1">あなたのスワイプ統計</p>
+            </div>
+            <MyPage stats={stats} loading={statsLoading} />
+          </div>
+        )}
       </main>
 
       {/* Bottom tab bar */}
@@ -300,6 +327,15 @@ export default function Home() {
         >
           <span className="text-xl">📋</span>
           <span>あとで見る</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('mypage')}
+          className={`flex-1 flex flex-col items-center justify-center gap-0.5 text-xs transition-colors ${
+            activeTab === 'mypage' ? 'text-indigo-400' : 'text-slate-500'
+          }`}
+        >
+          <span className="text-xl">📊</span>
+          <span>マイページ</span>
         </button>
       </nav>
 

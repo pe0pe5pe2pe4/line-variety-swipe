@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import type { Content } from '@/lib/types';
+import { inferGenre } from '@/lib/genre';
 
 // ───────────────────────────────────────────────
 // キーワード抽出ユーティリティ
@@ -30,14 +31,6 @@ function buildFreqMap(
   return freq;
 }
 
-function scoreContent(
-  c: { title: string; description?: string | null },
-  freq: Record<string, number>
-): number {
-  const words = extractKeywords(`${c.title} ${c.description ?? ''}`);
-  return words.reduce((sum, w) => sum + (freq[w] ?? 0), 0);
-}
-
 /** 右スワイプしたコンテンツからYouTube検索クエリ用キーワードを抽出 */
 function extractSearchKeywords(
   contents: { title: string; channel_name?: string | null }[]
@@ -54,12 +47,88 @@ function extractSearchKeywords(
 }
 
 // ───────────────────────────────────────────────
+// ユーザー嗜好プロファイル（重み付け：ジャンル3 / 放送局2 / キーワード1）
+// ───────────────────────────────────────────────
+type LikedRow = { title: string; description?: string | null; channel_name?: string | null; content_type?: string | null };
+
+type Profile = {
+  genreWeights: Record<string, number>;
+  stationWeights: Record<string, number>;
+  keywordFreq: Record<string, number>;
+  dislikedGenres: Record<string, number>; // 左スワイプしたジャンル → 表示頻度を下げる
+  topGenre?: string;
+  topStation?: string;
+};
+
+const W_GENRE = 3;
+const W_STATION = 2;
+const W_KEYWORD = 1;
+const PENALTY_DISLIKED_GENRE = 1.5;
+
+function topKey(weights: Record<string, number>): string | undefined {
+  const entries = Object.entries(weights);
+  if (entries.length === 0) return undefined;
+  return entries.sort(([, a], [, b]) => b - a)[0][0];
+}
+
+function buildProfile(liked: LikedRow[], disliked: LikedRow[]): Profile {
+  const genreWeights: Record<string, number> = {};
+  const stationWeights: Record<string, number> = {};
+  for (const c of liked) {
+    const g = inferGenre(c);
+    genreWeights[g] = (genreWeights[g] ?? 0) + 1;
+    const st = c.channel_name?.trim();
+    if (st) stationWeights[st] = (stationWeights[st] ?? 0) + 1;
+  }
+  const dislikedGenres: Record<string, number> = {};
+  for (const c of disliked) {
+    const g = inferGenre(c);
+    dislikedGenres[g] = (dislikedGenres[g] ?? 0) + 1;
+  }
+  return {
+    genreWeights,
+    stationWeights,
+    keywordFreq: buildFreqMap(liked),
+    dislikedGenres,
+    topGenre: topKey(genreWeights),
+    topStation: topKey(stationWeights),
+  };
+}
+
+function hasPreference(p: Profile): boolean {
+  return Object.keys(p.genreWeights).length > 0 || Object.keys(p.keywordFreq).length > 0;
+}
+
+/** ジャンル3 / 放送局2 / キーワード1 で重み付けし、嫌いなジャンルは減点 */
+function scoreWithProfile(c: Content, p: Profile): number {
+  const genre = inferGenre(c);
+  let score = 0;
+  score += W_GENRE * (p.genreWeights[genre] ?? 0);
+  const st = c.channel_name?.trim();
+  if (st) score += W_STATION * (p.stationWeights[st] ?? 0);
+  const words = extractKeywords(`${c.title} ${c.description ?? ''}`);
+  score += W_KEYWORD * words.reduce((sum, w) => sum + (p.keywordFreq[w] ?? 0), 0);
+  // 左スワイプと同ジャンルは頻度を下げる
+  score -= PENALTY_DISLIKED_GENRE * (p.dislikedGenres[genre] ?? 0);
+  return score;
+}
+
+/** 推薦理由（トップ嗜好に一致する場合のみ付与） */
+function reasonFor(c: Content, p: Profile): string | undefined {
+  const genre = inferGenre(c);
+  if (p.topGenre && genre === p.topGenre) return `${p.topGenre}が好きそうなので`;
+  const st = c.channel_name?.trim();
+  if (p.topStation && st === p.topStation) return `${p.topStation}をよく見るので`;
+  return undefined;
+}
+
+// ───────────────────────────────────────────────
 // TV番組取得（Supabase）
 // ───────────────────────────────────────────────
 async function fetchTVShows(
   swipedIds: string[],
   swipedTitles: Set<string>,
-  freqMap: Record<string, number>,
+  profile: Profile,
   count: number
 ): Promise<Content[]> {
   // content_type が tv_show または NULL（未移行データ）を対象
@@ -81,17 +150,18 @@ async function fetchTVShows(
   const list = dedupeByTitle((data ?? []) as Content[], swipedTitles);
   if (list.length === 0) return [];
 
-  if (Object.keys(freqMap).length === 0) {
+  if (!hasPreference(profile)) {
     // スワイプ履歴なし → ランダム
     return shuffle(list).slice(0, count);
   }
 
-  // スコアリング + 重み付きシャッフル
-  const maxScore = Math.max(...list.map((c) => scoreContent(c, freqMap)), 1);
+  // スコアリング + 重み付きシャッフル（ジャンル3/放送局2/キーワード1・嫌いジャンル減点）
+  const scores = list.map((c) => scoreWithProfile(c, profile));
+  const maxScore = Math.max(...scores, 1);
   return list
-    .map((c) => ({
+    .map((c, i) => ({
       c,
-      sortKey: (scoreContent(c, freqMap) / maxScore) * 0.7 + Math.random() * 0.3,
+      sortKey: (scores[i] / maxScore) * 0.7 + Math.random() * 0.3,
     }))
     .sort((a, b) => b.sortKey - a.sortKey)
     .slice(0, count)
@@ -360,14 +430,16 @@ export async function GET(request: Request) {
   ]);
   const swipedIds = [...swipedIdSet];
   const rightSwipes = (allSwipes ?? []).filter((s) => s.direction === 'right');
+  const leftSwipes = (allSwipes ?? []).filter((s) => s.direction === 'left');
   const rightSwipeCount = rightSwipes.length;
   const rightSwipeIds = rightSwipes.map((s) => s.content_id as string);
+  const leftSwipeIds = leftSwipes.map((s) => s.content_id as string);
 
-  // ── STEP 2: スワイプ済みタイトル & 右スワイプ履歴からキーワード抽出 ──
+  // ── STEP 2: スワイプ済みタイトル & 嗜好プロファイル構築 ──
   // スワイプ済みタイトルを集約し、DBに重複行があっても再表示されないようにする
   const swipedTitles = new Set<string>();
   let keywords: string[] = [];
-  let freqMap: Record<string, number> = {};
+  let profile: Profile = buildProfile([], []);
 
   if (swipedIds.length > 0) {
     const { data: swipedContents } = await supabase
@@ -380,16 +452,21 @@ export async function GET(request: Request) {
     }
   }
 
-  if (rightSwipeIds.length > 0) {
-    const { data: likedContents } = await supabase
-      .from('contents')
-      .select('title, description, channel_name')
-      .in('id', rightSwipeIds);
+  // 右スワイプ＝好き / 左スワイプ＝嫌い の詳細を取得してプロファイル化
+  const [likedRes, dislikedRes] = await Promise.all([
+    rightSwipeIds.length > 0
+      ? supabase.from('contents').select('title, description, channel_name, content_type').in('id', rightSwipeIds)
+      : Promise.resolve({ data: [] as LikedRow[] }),
+    leftSwipeIds.length > 0
+      ? supabase.from('contents').select('title, description, channel_name, content_type').in('id', leftSwipeIds)
+      : Promise.resolve({ data: [] as LikedRow[] }),
+  ]);
 
-    if (likedContents?.length) {
-      keywords = extractSearchKeywords(likedContents);
-      freqMap = buildFreqMap(likedContents);
-    }
+  const likedContents = (likedRes.data ?? []) as LikedRow[];
+  const dislikedContents = (dislikedRes.data ?? []) as LikedRow[];
+  if (likedContents.length > 0 || dislikedContents.length > 0) {
+    profile = buildProfile(likedContents, dislikedContents);
+    keywords = extractSearchKeywords(likedContents);
   }
 
   // ── STEP 3: 混在比率を決定（2段階パーソナライズ）──
@@ -411,7 +488,7 @@ export async function GET(request: Request) {
   // 0-9スワイプ：DBのキャッシュ済みYouTube（API呼び出しなし）
   // 10+スワイプ：リアルタイムYouTube API検索
   const [tvShows, ytVideos] = await Promise.all([
-    fetchTVShows(swipedIds, swipedTitles, freqMap, tvCount + ytCount),
+    fetchTVShows(swipedIds, swipedTitles, profile, tvCount + ytCount),
     rightSwipeCount < 10
       ? fetchStoredYouTubeVideos(swipedIds, swipedTitles, ytCount)
       : fetchYouTubeVideos(keywords, swipedIds, swipedTitles, ytCount),
@@ -422,13 +499,19 @@ export async function GET(request: Request) {
   const finalTvCount = tvCount + (ytCount - actualYtCount);
   const finalTvShows = tvShows.slice(0, finalTvCount);
 
-  // ── STEP 5: 混在・返却 ──
-  const result = mixContent(finalTvShows, ytVideos);
+  // ── STEP 5: 混在・ジャンル/推薦理由を付与して返却 ──
+  const mixed = mixContent(finalTvShows, ytVideos);
+  const result = mixed.map((c) => ({
+    ...c,
+    genre: inferGenre(c),
+    recommend_reason: reasonFor(c, profile),
+  }));
 
   return NextResponse.json(result, {
     headers: {
       'X-Mix-Ratio': `tv=${finalTvShows.length}/yt=${actualYtCount}`,
       'X-Right-Swipes': String(rightSwipeCount),
+      'X-Top-Genre': profile.topGenre ?? '',
       'X-Keywords': keywords.slice(0, 5).join(','),
     },
   });
