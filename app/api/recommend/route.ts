@@ -58,6 +58,7 @@ function extractSearchKeywords(
 // ───────────────────────────────────────────────
 async function fetchTVShows(
   swipedIds: string[],
+  swipedTitles: Set<string>,
   freqMap: Record<string, number>,
   count: number
 ): Promise<Content[]> {
@@ -69,14 +70,15 @@ async function fetchTVShows(
     .or('content_type.eq.tv_show,content_type.is.null')
     .not('thumbnail_url', 'eq', 'no_image')
     .order('description', { ascending: false, nullsFirst: false })
-    .limit(80);
+    .limit(120);
 
   if (swipedIds.length > 0) {
     query = query.not('id', 'in', `(${swipedIds.join(',')})`);
   }
 
   const { data } = await query;
-  const list = (data ?? []) as Content[];
+  // スワイプ済みタイトル除外 + タイトル重複排除（DBに同じ番組が複数行ある場合の再表示を防ぐ）
+  const list = dedupeByTitle((data ?? []) as Content[], swipedTitles);
   if (list.length === 0) return [];
 
   if (Object.keys(freqMap).length === 0) {
@@ -155,6 +157,7 @@ async function searchYouTubeAPI(query: string, maxResults: number): Promise<RawY
 async function fetchYouTubeVideos(
   keywords: string[],
   swipedIds: string[],
+  swipedTitles: Set<string>,
   count: number
 ): Promise<Content[]> {
   if (!process.env.YOUTUBE_API_KEY) return [];
@@ -214,14 +217,18 @@ async function fetchYouTubeVideos(
     return [];
   }
 
-  // ── スワイプ済み除外・Content型に変換 ──
+  // ── スワイプ済み除外・タイトル重複排除・Content型に変換 ──
   const swipedSet = new Set(swipedIds);
+  const seenTitles = new Set<string>();
   const results: Content[] = [];
 
   for (const v of rawItems) {
     if (results.length >= count) break;
     const id = existingMap.get(v.youtubeUrl);
     if (!id || swipedSet.has(id)) continue;
+    const titleKey = normalizeTitle(v.title);
+    if (swipedTitles.has(titleKey) || seenTitles.has(titleKey)) continue;
+    seenTitles.add(titleKey);
 
     results.push({
       id,
@@ -243,6 +250,7 @@ async function fetchYouTubeVideos(
 // ───────────────────────────────────────────────
 async function fetchStoredYouTubeVideos(
   swipedIds: string[],
+  swipedTitles: Set<string>,
   count: number
 ): Promise<Content[]> {
   let query = supabase
@@ -250,19 +258,41 @@ async function fetchStoredYouTubeVideos(
     .select('*')
     .eq('content_type', 'youtube')
     .not('thumbnail_url', 'eq', 'no_image')
-    .limit(count * 3);
+    .limit(count * 5);
 
   if (swipedIds.length > 0) {
     query = query.not('id', 'in', `(${swipedIds.join(',')})`);
   }
 
   const { data } = await query;
-  return shuffle((data ?? []) as Content[]).slice(0, count);
+  const list = dedupeByTitle((data ?? []) as Content[], swipedTitles);
+  return shuffle(list).slice(0, count);
 }
 
 // ───────────────────────────────────────────────
 // ユーティリティ
 // ───────────────────────────────────────────────
+function normalizeTitle(title: string): string {
+  return (title ?? '').trim().toLowerCase();
+}
+
+/**
+ * スワイプ済みタイトルを除外しつつ、タイトル重複を1件に集約する。
+ * DBに同一番組が複数行存在しても、1度スワイプすれば再表示されなくなる。
+ */
+function dedupeByTitle(list: Content[], excludeTitles: Set<string>): Content[] {
+  const seen = new Set<string>();
+  const result: Content[] = [];
+  for (const c of list) {
+    const key = normalizeTitle(c.title);
+    if (!key) continue;
+    if (excludeTitles.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    result.push(c);
+  }
+  return result;
+}
+
 function shuffle<T>(arr: T[]): T[] {
   const a = [...arr];
   for (let i = a.length - 1; i > 0; i--) {
@@ -311,20 +341,44 @@ export async function GET(request: Request) {
   const userId = searchParams.get('user_id');
   if (!userId) return NextResponse.json({ error: 'user_id required' }, { status: 400 });
 
+  // クライアントが既に表示済み（スワイプ反映前）のIDを除外できるようにする
+  const excludeParam = searchParams.get('exclude') ?? '';
+  const clientExcludeIds = excludeParam
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
   // ── STEP 1: スワイプ履歴取得 ──
   const { data: allSwipes } = await supabase
     .from('swipes')
     .select('content_id, direction')
     .eq('user_id', userId);
 
-  const swipedIds = (allSwipes ?? []).map((s) => s.content_id as string);
+  const swipedIdSet = new Set<string>([
+    ...(allSwipes ?? []).map((s) => s.content_id as string),
+    ...clientExcludeIds,
+  ]);
+  const swipedIds = [...swipedIdSet];
   const rightSwipes = (allSwipes ?? []).filter((s) => s.direction === 'right');
   const rightSwipeCount = rightSwipes.length;
   const rightSwipeIds = rightSwipes.map((s) => s.content_id as string);
 
-  // ── STEP 2: 右スワイプ履歴からキーワード抽出 ──
+  // ── STEP 2: スワイプ済みタイトル & 右スワイプ履歴からキーワード抽出 ──
+  // スワイプ済みタイトルを集約し、DBに重複行があっても再表示されないようにする
+  const swipedTitles = new Set<string>();
   let keywords: string[] = [];
   let freqMap: Record<string, number> = {};
+
+  if (swipedIds.length > 0) {
+    const { data: swipedContents } = await supabase
+      .from('contents')
+      .select('id, title')
+      .in('id', swipedIds);
+    for (const c of swipedContents ?? []) {
+      const key = (c.title ?? '').trim().toLowerCase();
+      if (key) swipedTitles.add(key);
+    }
+  }
 
   if (rightSwipeIds.length > 0) {
     const { data: likedContents } = await supabase
@@ -348,7 +402,8 @@ export async function GET(request: Request) {
     tvRatio = 0.3; // 30+件: tv 30% / youtube 70%（フル最適化）
   }
 
-  const TOTAL = 10;
+  // 1コールあたりの返却数を増やし、20回で止まる問題を解消（残り少で追加取得＝無限スワイプ）
+  const TOTAL = 20;
   const tvCount = Math.round(TOTAL * tvRatio);
   const ytCount = TOTAL - tvCount;
 
@@ -356,10 +411,10 @@ export async function GET(request: Request) {
   // 0-9スワイプ：DBのキャッシュ済みYouTube（API呼び出しなし）
   // 10+スワイプ：リアルタイムYouTube API検索
   const [tvShows, ytVideos] = await Promise.all([
-    fetchTVShows(swipedIds, freqMap, tvCount + ytCount),
+    fetchTVShows(swipedIds, swipedTitles, freqMap, tvCount + ytCount),
     rightSwipeCount < 10
-      ? fetchStoredYouTubeVideos(swipedIds, ytCount)
-      : fetchYouTubeVideos(keywords, swipedIds, ytCount),
+      ? fetchStoredYouTubeVideos(swipedIds, swipedTitles, ytCount)
+      : fetchYouTubeVideos(keywords, swipedIds, swipedTitles, ytCount),
   ]);
 
   // YouTube が足りない場合は TV で補完

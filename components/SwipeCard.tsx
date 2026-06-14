@@ -2,7 +2,8 @@
 import { useRef } from 'react';
 import { useSpring, animated } from '@react-spring/web';
 import { useDrag } from '@use-gesture/react';
-import { Content, getThumbnailSrc } from '@/lib/types';
+import { Content } from '@/lib/types';
+import ContentImage from './ContentImage';
 
 type Props = {
   content: Content;
@@ -71,7 +72,6 @@ export default function SwipeCard({ content, onSwipe, onShowDetail, isTop }: Pro
   const nowOpacity  = y.to((v) => Math.max(0, Math.min(1, -v / SWIPE_THRESHOLD)));
 
   const isYoutube = content.content_type === 'youtube';
-  const thumbnailSrc = getThumbnailSrc(content.thumbnail_url);
 
   return (
     <animated.div
@@ -92,15 +92,13 @@ export default function SwipeCard({ content, onSwipe, onShowDetail, isTop }: Pro
       className="will-change-transform"
     >
       <div className="w-full h-full bg-white rounded-3xl shadow-2xl overflow-hidden flex flex-col">
-        {/* Image */}
+        {/* Image — 全カード共通の固定比率（3:4 ポスター）で統一 */}
         <div className="relative flex-shrink-0 h-[60%] bg-gray-100">
-          <img
-            src={thumbnailSrc}
+          <ContentImage
+            src={content.thumbnail_url}
             alt={content.title}
-            className="w-full h-full object-cover"
-            draggable={false}
-            loading="eager"
-            fetchPriority={isTop ? 'high' : 'low'}
+            channelName={content.channel_name}
+            eager={isTop}
           />
           {/* Gradient overlay */}
           <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />

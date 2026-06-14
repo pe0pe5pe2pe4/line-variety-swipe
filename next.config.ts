@@ -2,6 +2,8 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   images: {
+    // Next.js 16: qualities must be allow-listed explicitly
+    qualities: [75],
     remotePatterns: [
       {
         protocol: 'https',
@@ -11,6 +13,17 @@ const nextConfig: NextConfig = {
       {
         protocol: 'https',
         hostname: 'upload.wikimedia.org',
+        pathname: '/**',
+      },
+      // YouTube サムネイル（i.ytimg.com / i9.ytimg.com など）
+      {
+        protocol: 'https',
+        hostname: '**.ytimg.com',
+        pathname: '/**',
+      },
+      {
+        protocol: 'https',
+        hostname: 'img.youtube.com',
         pathname: '/**',
       },
     ],
