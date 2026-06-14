@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
+import { searchTMDBShow } from '@/lib/tmdb';
 
-const TMDB_BASE = 'https://api.themoviedb.org/3';
 const WIKIPEDIA_API = 'https://ja.wikipedia.org/w/api.php';
 const BATCH_LIMIT = 20;
 
@@ -77,31 +77,6 @@ async function fetchWikipediaImage(title: string): Promise<string> {
   return page?.thumbnail?.source ?? '';
 }
 
-async function searchTMDB(title: string): Promise<{
-  tmdb_id: number | null;
-  thumbnail_url: string;
-  description: string;
-}> {
-  const tmdbKey = process.env.TMDB_API_KEY;
-  if (!tmdbKey) return { tmdb_id: null, thumbnail_url: '', description: '' };
-
-  const res = await fetch(
-    `${TMDB_BASE}/search/tv?query=${encodeURIComponent(title)}&language=ja-JP`,
-    { headers: { Authorization: `Bearer ${tmdbKey}` } }
-  );
-  if (!res.ok) return { tmdb_id: null, thumbnail_url: '', description: '' };
-  const data = await res.json();
-  const item = data?.results?.[0];
-  if (!item) return { tmdb_id: null, thumbnail_url: '', description: '' };
-
-  return {
-    tmdb_id: item.id,
-    thumbnail_url: item.poster_path
-      ? `https://image.tmdb.org/t/p/w500${item.poster_path}`
-      : '',
-    description: item.overview ?? '',
-  };
-}
 
 export async function GET(request: Request) {
   const authHeader = request.headers.get('authorization');
@@ -130,7 +105,7 @@ export async function GET(request: Request) {
     // 括弧付きの曖昧回避を除去（例: "アナザースカイ (テレビ番組)" → "アナザースカイ"）
     const title = rawTitle.replace(/\s*[（(][^）)]*[）)]\s*$/, '').trim();
 
-    const { tmdb_id, thumbnail_url: tmdbThumb, description: tmdbDesc } = await searchTMDB(title);
+    const { tmdb_id, thumbnail_url: tmdbThumb, description: tmdbDesc } = await searchTMDBShow(title);
     const description = tmdbDesc || (await fetchWikipediaDescription(rawTitle));
 
     // TMDBに画像がなければWikipediaのページ画像で補完

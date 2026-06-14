@@ -1,27 +1,9 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
+import { searchTMDBShow } from '@/lib/tmdb';
 
-const TMDB_BASE = 'https://api.themoviedb.org/3';
 const WIKIPEDIA_API = 'https://ja.wikipedia.org/w/api.php';
-const BATCH = 20; // 1回あたりの処理件数（タイムアウト防止）
-
-async function searchTMDBImage(title: string): Promise<string> {
-  const key = process.env.TMDB_API_KEY;
-  if (!key) return '';
-
-  const res = await fetch(
-    `${TMDB_BASE}/search/tv?query=${encodeURIComponent(title)}&language=ja-JP`,
-    { headers: { Authorization: `Bearer ${key}` } }
-  );
-  if (!res.ok) return '';
-  const data = await res.json();
-
-  // poster_path優先、なければbackdrop_path
-  const item = data?.results?.[0];
-  if (item?.poster_path) return `https://image.tmdb.org/t/p/w500${item.poster_path}`;
-  if (item?.backdrop_path) return `https://image.tmdb.org/t/p/w500${item.backdrop_path}`;
-  return '';
-}
+const BATCH = 20;
 
 async function searchWikipediaImage(title: string): Promise<string> {
   const params = new URLSearchParams({
@@ -78,7 +60,7 @@ export async function GET(request: Request) {
     const title = row.title as string;
 
     // 1. TMDBで検索
-    let url = await searchTMDBImage(title);
+    let url = (await searchTMDBShow(title)).thumbnail_url;
     let source = 'tmdb';
 
     // 2. TMDBになければWikipediaで検索
