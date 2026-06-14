@@ -2,26 +2,21 @@
 import { useRef } from 'react';
 import { useSpring, animated } from '@react-spring/web';
 import { useDrag } from '@use-gesture/react';
-
-type Content = {
-  id: string;
-  title: string;
-  description: string;
-  thumbnail_url: string;
-  vod_affiliate_url: string;
-};
+import { Content, getThumbnailSrc } from '@/lib/types';
 
 type Props = {
   content: Content;
-  onSwipe: (direction: 'left' | 'right') => void;
+  onSwipe: (direction: 'left' | 'right' | 'up') => void;
+  onShowDetail: () => void;
   isTop: boolean;
 };
 
 const SWIPE_THRESHOLD = 100;
 
-export default function SwipeCard({ content, onSwipe, isTop }: Props) {
-  const [{ x, rotate, opacity }, api] = useSpring(() => ({
+export default function SwipeCard({ content, onSwipe, onShowDetail, isTop }: Props) {
+  const [{ x, y, rotate, opacity }, api] = useSpring(() => ({
     x: 0,
+    y: 0,
     rotate: 0,
     opacity: 1,
     config: { tension: 300, friction: 30 },
@@ -29,13 +24,30 @@ export default function SwipeCard({ content, onSwipe, isTop }: Props) {
 
   const gone = useRef(false);
 
+  // filterTaps:false → tap イベントも callback に届く（tap:true で判定）
   const bind = useDrag(
-    ({ active, movement: [mx], velocity: [vx], direction: [dx] }) => {
+    ({ active, movement: [mx, my], velocity: [vx, vy], tap }) => {
       if (gone.current) return;
 
-      const trigger = Math.abs(mx) > SWIPE_THRESHOLD || Math.abs(vx) > 0.5;
+      // タップ → モーダル表示
+      if (tap) {
+        onShowDetail();
+        return;
+      }
 
-      if (!active && trigger) {
+      const horizTrigger = Math.abs(mx) > SWIPE_THRESHOLD || Math.abs(vx) > 0.5;
+      // 上スワイプ：y が負方向（上）に閾値超え、かつ水平より垂直が優勢
+      const upTrigger = my < -SWIPE_THRESHOLD || vy < -0.5;
+      const isVertical = Math.abs(my) > Math.abs(mx);
+
+      if (!active && upTrigger && isVertical) {
+        gone.current = true;
+        api.start({
+          y: -(window.innerHeight * 1.5),
+          opacity: 0,
+          onRest: () => onSwipe('up'),
+        });
+      } else if (!active && horizTrigger && !isVertical) {
         gone.current = true;
         const dir = mx > 0 ? 1 : -1;
         api.start({
@@ -45,27 +57,28 @@ export default function SwipeCard({ content, onSwipe, isTop }: Props) {
           onRest: () => onSwipe(dir > 0 ? 'right' : 'left'),
         });
       } else if (!active) {
-        api.start({ x: 0, rotate: 0, opacity: 1 });
+        api.start({ x: 0, y: 0, rotate: 0, opacity: 1 });
       } else {
-        api.start({
-          x: mx,
-          rotate: mx / 15,
-          opacity: 1,
-          immediate: true,
-        });
+        api.start({ x: mx, y: my, rotate: mx / 15, opacity: 1, immediate: true });
       }
     },
-    { filterTaps: true, pointer: { touch: true } }
+    { filterTaps: false, pointer: { touch: true } }
   );
 
   const likeOpacity = x.to((v) => Math.max(0, Math.min(1, v / SWIPE_THRESHOLD)));
   const nopeOpacity = x.to((v) => Math.max(0, Math.min(1, -v / SWIPE_THRESHOLD)));
+  // 上スワイプ時（y が負）に NOW バッジを表示
+  const nowOpacity  = y.to((v) => Math.max(0, Math.min(1, -v / SWIPE_THRESHOLD)));
+
+  const isYoutube = content.content_type === 'youtube';
+  const thumbnailSrc = getThumbnailSrc(content.thumbnail_url);
 
   return (
     <animated.div
       {...(isTop ? bind() : {})}
       style={{
         x,
+        y,
         rotate,
         opacity,
         touchAction: 'none',
@@ -74,20 +87,15 @@ export default function SwipeCard({ content, onSwipe, isTop }: Props) {
         cursor: isTop ? 'grab' : 'default',
         userSelect: 'none',
       }}
+      // 長押し：モバイルで contextmenu イベントが発火する
+      onContextMenu={(e) => { e.preventDefault(); if (isTop && !gone.current) onShowDetail(); }}
       className="will-change-transform"
     >
       <div className="w-full h-full bg-white rounded-3xl shadow-2xl overflow-hidden flex flex-col">
         {/* Image */}
         <div className="relative flex-shrink-0 h-[60%] bg-gray-100">
           <img
-            src={
-              content.thumbnail_url &&
-              content.thumbnail_url !== 'not_found' &&
-              content.thumbnail_url !== 'no_image' &&
-              !content.thumbnail_url.includes('placehold.co')
-                ? content.thumbnail_url
-                : 'https://placehold.co/400x600/1a1a2e/ffffff?text=No+Image'
-            }
+            src={thumbnailSrc}
             alt={content.title}
             className="w-full h-full object-cover"
             draggable={false}
@@ -96,6 +104,15 @@ export default function SwipeCard({ content, onSwipe, isTop }: Props) {
           />
           {/* Gradient overlay */}
           <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+
+          {/* YouTube play icon */}
+          {isYoutube && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="w-16 h-16 flex items-center justify-center bg-red-600/80 rounded-full">
+                <span className="text-white text-3xl ml-1">▶</span>
+              </div>
+            </div>
+          )}
 
           {/* LIKE badge */}
           <animated.div
@@ -112,25 +129,45 @@ export default function SwipeCard({ content, onSwipe, isTop }: Props) {
           >
             NOPE
           </animated.div>
+
+          {/* NOW badge (上スワイプ) */}
+          <animated.div
+            style={{ opacity: nowOpacity }}
+            className="absolute top-6 left-1/2 -translate-x-1/2 border-4 border-sky-400 text-sky-400 font-black text-2xl px-3 py-1 rounded-xl tracking-widest whitespace-nowrap"
+          >
+            今すぐ見る
+          </animated.div>
         </div>
 
         {/* Info */}
-        <div className="flex flex-col flex-1 p-5 gap-2">
+        <div className="flex flex-col flex-1 p-4 gap-1.5">
           <h2 className="text-xl font-bold text-gray-900 leading-tight line-clamp-2">{content.title}</h2>
-          <p className="text-sm text-gray-500 line-clamp-3 flex-1">{content.description}</p>
+          <p className="text-sm text-gray-500 line-clamp-2 flex-1">{content.description}</p>
 
           {/* Action buttons */}
-          <div className="flex justify-center gap-8 pt-2">
+          <div className="flex justify-center items-center gap-5 pt-1">
+            {/* NOPE */}
             <button
               onPointerDown={(e) => { e.stopPropagation(); onSwipe('left'); }}
-              className="w-14 h-14 flex items-center justify-center rounded-full border-2 border-rose-300 text-rose-400 text-2xl shadow-md hover:bg-rose-50 active:scale-95 transition-all"
+              className="w-13 h-13 w-[52px] h-[52px] flex items-center justify-center rounded-full border-2 border-rose-300 text-rose-400 text-2xl shadow-md hover:bg-rose-50 active:scale-95 transition-all"
               aria-label="Skip"
             >
               ✕
             </button>
+
+            {/* NOW (上スワイプ = 今すぐ見る) */}
+            <button
+              onPointerDown={(e) => { e.stopPropagation(); onSwipe('up'); }}
+              className="w-[44px] h-[44px] flex items-center justify-center rounded-full border-2 border-sky-300 text-sky-400 text-lg shadow-md hover:bg-sky-50 active:scale-95 transition-all"
+              aria-label="Watch Now"
+            >
+              ▶
+            </button>
+
+            {/* LIKE (あとで見る) */}
             <button
               onPointerDown={(e) => { e.stopPropagation(); onSwipe('right'); }}
-              className="w-14 h-14 flex items-center justify-center rounded-full border-2 border-emerald-300 text-emerald-500 text-2xl shadow-md hover:bg-emerald-50 active:scale-95 transition-all"
+              className="w-[52px] h-[52px] flex items-center justify-center rounded-full border-2 border-emerald-300 text-emerald-500 text-2xl shadow-md hover:bg-emerald-50 active:scale-95 transition-all"
               aria-label="Like"
             >
               ♥

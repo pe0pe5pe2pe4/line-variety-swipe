@@ -1,14 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import SwipeCard from './SwipeCard';
-
-type Content = {
-  id: string;
-  title: string;
-  description: string;
-  thumbnail_url: string;
-  vod_affiliate_url: string;
-};
+import { Content } from '@/lib/types';
 
 const ONBOARDING_KEY = 'onboarding_done';
 const ONBOARDING_COUNT = 20;
@@ -33,7 +26,7 @@ export default function Onboarding({ onComplete }: Props) {
       .catch(() => setLoading(false));
   }, []);
 
-  const handleSwipe = (direction: 'left' | 'right', content: Content) => {
+  const handleSwipe = (direction: 'left' | 'right' | 'up', content: Content) => {
     const next = contents.filter((c) => c.id !== content.id);
     const newSwiped = swiped + 1;
     setSwiped(newSwiped);
@@ -117,6 +110,7 @@ export default function Onboarding({ onComplete }: Props) {
                 <SwipeCard
                   content={content}
                   onSwipe={(dir) => handleSwipe(dir, content)}
+                  onShowDetail={() => {}}
                   isTop={isTop}
                 />
               </div>
