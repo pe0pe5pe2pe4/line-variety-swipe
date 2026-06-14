@@ -7,16 +7,17 @@ const ONBOARDING_KEY = 'onboarding_done';
 const ONBOARDING_COUNT = 20;
 
 type Props = {
+  userId: string;
   onComplete: () => void;
 };
 
-export default function Onboarding({ onComplete }: Props) {
+export default function Onboarding({ userId, onComplete }: Props) {
   const [contents, setContents] = useState<Content[]>([]);
   const [loading, setLoading] = useState(true);
   const [swiped, setSwiped] = useState(0);
 
   useEffect(() => {
-    fetch('/api/recommend?user_id=onboarding')
+    fetch(`/api/recommend?user_id=${userId}`)
       .then((r) => r.json())
       .then((data) => {
         const items = Array.isArray(data) ? data.slice(0, ONBOARDING_COUNT) : [];
@@ -31,6 +32,13 @@ export default function Onboarding({ onComplete }: Props) {
     const newSwiped = swiped + 1;
     setSwiped(newSwiped);
     setContents(next);
+
+    // オンボーディング中のスワイプもログに記録（レコメンド精度向上のため）
+    fetch('/api/swipes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: userId, content_id: content.id, direction }),
+    }).catch(() => {});
 
     if (next.length === 0 || newSwiped >= ONBOARDING_COUNT) {
       localStorage.setItem(ONBOARDING_KEY, '1');

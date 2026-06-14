@@ -13,6 +13,8 @@ const PRELOAD_COUNT = 3;
 type Tab = 'swipe' | 'watchlater';
 
 export default function Home() {
+  // userId: null = LIFF初期化中（ローディング表示）
+  const [userId, setUserId] = useState<string | null>(null);
   const [onboardingDone, setOnboardingDone] = useState<boolean | null>(null);
   const [contents, setContents] = useState<Content[]>([]);
   const [loading, setLoading] = useState(true);
@@ -21,38 +23,80 @@ export default function Home() {
   const [watchLater, setWatchLater] = useState<Content[]>([]);
   const [watchLaterLoading, setWatchLaterLoading] = useState(false);
 
+  // ── TASK 2: LIFF 初期化 ──────────────────────────────────
+  useEffect(() => {
+    async function initUser() {
+      const liffId = process.env.NEXT_PUBLIC_LIFF_ID;
+
+      // LIFF_ID が未設定 or 'dummy' → 開発用フォールバック
+      if (!liffId || liffId === 'dummy') {
+        setUserId(DUMMY_USER_ID);
+        return;
+      }
+
+      try {
+        const { initializeLiff } = await import('@/lib/liff');
+        const profile = await initializeLiff();
+
+        if (profile) {
+          setUserId(profile.userId);
+
+          // usersテーブルに upsert（fire-and-forget）
+          fetch('/api/users', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              line_user_id: profile.userId,
+              display_name: profile.displayName,
+              picture_url: profile.pictureUrl ?? null,
+            }),
+          }).catch(() => {});
+        }
+        // profile が null の場合は liff.login() でリダイレクト中
+        // → userId は null のままローディング表示を維持
+      } catch {
+        // 初期化失敗時は開発用 ID にフォールバック
+        setUserId(DUMMY_USER_ID);
+      }
+    }
+
+    initUser();
+  }, []);
+
+  // オンボーディング確認（同期的なので userId と独立して即実行）
   useEffect(() => {
     const done = localStorage.getItem(ONBOARDING_KEY) === '1';
     setOnboardingDone(done);
   }, []);
 
+  // コンテンツ取得（userId と onboardingDone 両方が揃ってから）
   useEffect(() => {
-    if (!onboardingDone) return;
-    fetch(`/api/recommend?user_id=${DUMMY_USER_ID}`)
+    if (!userId || !onboardingDone) return;
+    setLoading(true);
+    fetch(`/api/recommend?user_id=${userId}`)
       .then((r) => r.json())
       .then((data) => {
         setContents(Array.isArray(data) ? data : []);
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, [onboardingDone]);
+  }, [userId, onboardingDone]);
 
   // あとで見るリストをロード（タブ切替時）
   useEffect(() => {
-    if (activeTab !== 'watchlater') return;
+    if (activeTab !== 'watchlater' || !userId) return;
     setWatchLaterLoading(true);
-    fetch(`/api/swipes?user_id=${DUMMY_USER_ID}`)
+    fetch(`/api/swipes?user_id=${userId}`)
       .then((r) => r.json())
       .then((data) => {
         setWatchLater(Array.isArray(data) ? data : []);
         setWatchLaterLoading(false);
       })
       .catch(() => setWatchLaterLoading(false));
-  }, [activeTab]);
+  }, [activeTab, userId]);
 
   // プリロード済み画像をrefで保持（GC防止）
   const preloadCache = useRef<Map<string, HTMLImageElement>>(new Map());
-
   useEffect(() => {
     contents.forEach((c) => {
       if (!c.thumbnail_url || preloadCache.current.has(c.thumbnail_url)) return;
@@ -66,7 +110,6 @@ export default function Home() {
     setContents((prev) => prev.filter((c) => c.id !== content.id));
 
     if (direction === 'up') {
-      // 今すぐ見る
       if (content.content_type === 'youtube' && content.youtube_url) {
         window.open(content.youtube_url, '_blank');
       } else {
@@ -75,27 +118,40 @@ export default function Home() {
     }
 
     if (direction === 'right') {
-      // あとで見るリストにも追加（ローカルstate）
       setWatchLater((prev) => [content, ...prev.filter((c) => c.id !== content.id)]);
     }
 
-    fetch('/api/swipes', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: DUMMY_USER_ID, content_id: content.id, direction }),
-    }).catch(() => {});
+    if (userId) {
+      fetch('/api/swipes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: userId, content_id: content.id, direction }),
+      }).catch(() => {});
+    }
   };
 
-  const handleShowDetail = (content: Content) => {
-    setModalContent(content);
-  };
+  const handleShowDetail = (content: Content) => setModalContent(content);
 
-  // Wait for localStorage check
-  if (onboardingDone === null) return null;
+  // ── ローディング：userId または onboardingDone が未確定 ──
+  if (userId === null || onboardingDone === null) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-slate-900 to-indigo-950">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 rounded-full border-4 border-indigo-400 border-t-transparent animate-spin" />
+          <p className="text-slate-400 text-sm">読み込み中...</p>
+        </div>
+      </div>
+    );
+  }
 
-  // Show onboarding on first visit
+  // ── オンボーディング ──
   if (!onboardingDone) {
-    return <Onboarding onComplete={() => setOnboardingDone(true)} />;
+    return (
+      <Onboarding
+        userId={userId}
+        onComplete={() => setOnboardingDone(true)}
+      />
+    );
   }
 
   const visibleCards = contents.slice(0, PRELOAD_COUNT);
@@ -119,13 +175,11 @@ export default function Home() {
               </div>
             ) : (
               <>
-                {/* Header */}
                 <div className="w-full max-w-sm mb-4 text-center">
                   <h1 className="text-white text-2xl font-black tracking-tight">バラエティ発見</h1>
                   <p className="text-slate-400 text-xs mt-1">タップで詳細 / 上スワイプで今すぐ見る</p>
                 </div>
 
-                {/* Card stack */}
                 <div className="relative w-full max-w-sm" style={{ height: '520px' }}>
                   {visibleCards.map((content, i) => {
                     const isTop = i === 0;
@@ -171,10 +225,7 @@ export default function Home() {
                 <div className="w-10 h-10 rounded-full border-4 border-indigo-400 border-t-transparent animate-spin" />
               </div>
             ) : (
-              <WatchLaterList
-                items={watchLater}
-                onShowDetail={handleShowDetail}
-              />
+              <WatchLaterList items={watchLater} onShowDetail={handleShowDetail} />
             )}
           </div>
         )}

@@ -12,9 +12,20 @@ export default function DetailModal({ content, onClose }: Props) {
   const isYoutube = content.content_type === 'youtube';
   const thumbnailSrc = getThumbnailSrc(content.thumbnail_url);
 
+  // ① TVer（常に表示）
   const tverUrl = `https://tver.jp/search/#${encodeURIComponent(content.title)}`;
+
+  // ② YouTube（content_type === 'youtube' のみ）
   const youtubeUrl = content.youtube_url
     ?? `https://www.youtube.com/results?search_query=${encodeURIComponent(content.title)}`;
+
+  // ③ ABEMA（常に表示）
+  const abemaUrl = `https://abema.tv/search?q=${encodeURIComponent(content.title)}`;
+
+  // ④⑤⑥ U-NEXT / Hulu / Amazon（vod_affiliate_urlが設定されている場合のみ）
+  // 現時点は空なので非表示。後からアフィリエイトリンクを差し込むと自動表示される
+  const affiliateUrl = content.vod_affiliate_url?.trim() ?? '';
+  const hasAffiliate = affiliateUrl.length > 0;
 
   return (
     <div
@@ -65,59 +76,53 @@ export default function DetailModal({ content, onClose }: Props) {
 
             {/* Platform buttons */}
             <div className="flex flex-col gap-3 mt-5 pb-6">
-              {isYoutube ? (
+
+              {/* ① TVer（常に表示・無料コンテンツ最優先） */}
+              <a
+                href={tverUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-center gap-2 py-3.5 bg-blue-500 text-white rounded-2xl font-bold text-sm active:opacity-80 transition-opacity"
+              >
+                <span>📺</span> TVer で見る（無料）
+              </a>
+
+              {/* ② YouTube（youtube コンテンツのみ） */}
+              {isYoutube && (
                 <a
                   href={youtubeUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center justify-center gap-2 py-3.5 bg-red-500 text-white rounded-2xl font-bold text-sm active:opacity-80 transition-opacity"
                 >
-                  <span className="text-lg">▶</span> YouTubeで見る
+                  <span className="text-lg">▶</span> YouTube で見る（無料）
                 </a>
-              ) : (
-                <>
-                  <a
-                    href={tverUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center justify-center gap-2 py-3.5 bg-blue-500 text-white rounded-2xl font-bold text-sm active:opacity-80 transition-opacity"
-                  >
-                    <span>📺</span> TVer で見る
-                  </a>
-                  <a
-                    href={`https://video.unext.jp/search?query=${encodeURIComponent(content.title)}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center justify-center gap-2 py-3.5 bg-purple-600 text-white rounded-2xl font-bold text-sm active:opacity-80 transition-opacity"
-                  >
-                    <span>🎬</span> U-NEXT で見る
-                  </a>
-                  <a
-                    href={`https://www.hulu.jp/search?q=${encodeURIComponent(content.title)}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center justify-center gap-2 py-3.5 bg-green-500 text-white rounded-2xl font-bold text-sm active:opacity-80 transition-opacity"
-                  >
-                    <span>🎥</span> Hulu で見る
-                  </a>
-                  <a
-                    href={`https://abema.tv/search?q=${encodeURIComponent(content.title)}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center justify-center gap-2 py-3.5 bg-cyan-500 text-white rounded-2xl font-bold text-sm active:opacity-80 transition-opacity"
-                  >
-                    <span>📡</span> ABEMA で見る
-                  </a>
-                  <a
-                    href={`https://www.amazon.co.jp/s?k=${encodeURIComponent(content.title)}&i=prime-instant-video`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center justify-center gap-2 py-3.5 bg-orange-400 text-white rounded-2xl font-bold text-sm active:opacity-80 transition-opacity"
-                  >
-                    <span>🛒</span> Amazon Prime で見る
-                  </a>
-                </>
               )}
+
+              {/* ③ ABEMA（常に表示・無料コンテンツ多数） */}
+              <a
+                href={abemaUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-center gap-2 py-3.5 bg-cyan-500 text-white rounded-2xl font-bold text-sm active:opacity-80 transition-opacity"
+              >
+                <span>📡</span> ABEMA で見る（一部無料）
+              </a>
+
+              {/* ④ U-NEXT（アフィリエイトリンクが設定された場合のみ） */}
+              {hasAffiliate && (
+                <a
+                  href={affiliateUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-2 py-3.5 bg-purple-600 text-white rounded-2xl font-bold text-sm active:opacity-80 transition-opacity"
+                >
+                  <span>🎬</span> U-NEXT で見る
+                </a>
+              )}
+
+              {/* ⑤ Hulu・⑥ Amazon Prime は個別カラムが追加されたら表示 */}
+              {/* Netflix はアフィリエイトプログラムなし → 非表示 */}
             </div>
           </div>
         </div>
