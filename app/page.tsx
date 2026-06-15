@@ -645,7 +645,7 @@ export default function Home() {
               <h1 className="text-white text-2xl font-black tracking-tight">マイページ</h1>
               <p className="text-slate-400 text-xs mt-1">あなたのスワイプ統計</p>
             </div>
-            <MyPage stats={stats} referral={referral} loading={statsLoading} />
+            <MyPage stats={stats} referral={referral} userId={userId} loading={statsLoading} />
           </div>
         )}
       </main>

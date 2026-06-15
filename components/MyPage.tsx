@@ -32,8 +32,38 @@ export type ReferralInfo = {
 type Props = {
   stats: Stats | null;
   referral?: ReferralInfo | null;
+  userId?: string | null;
   loading: boolean;
 };
+
+function ExportButton({ userId }: { userId?: string | null }) {
+  const handleExport = async () => {
+    if (!userId) return;
+    try {
+      const res = await fetch(`/api/export-data?user_id=${encodeURIComponent(userId)}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'baraoshi-export.json';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      // 無視
+    }
+  };
+  return (
+    <button
+      onClick={handleExport}
+      aria-label="データをエクスポート"
+      className="w-full py-3 bg-slate-700 text-white rounded-2xl font-bold text-sm active:scale-95 transition-transform"
+    >
+      📥 データをエクスポート
+    </button>
+  );
+}
 
 function InviteSection({ referral }: { referral: ReferralInfo }) {
   const copy = () => {
@@ -101,7 +131,7 @@ function RankingList({
   );
 }
 
-export default function MyPage({ stats, referral, loading }: Props) {
+export default function MyPage({ stats, referral, userId, loading }: Props) {
   if (loading) {
     return (
       <div className="flex justify-center mt-10">
@@ -202,6 +232,9 @@ export default function MyPage({ stats, referral, loading }: Props) {
 
       {/* 設定：文字サイズ */}
       <FontSizeSetting />
+
+      {/* データエクスポート（GDPR対応） */}
+      <ExportButton userId={userId} />
 
       {/* ジャンル・放送局ランキング */}
       <RankingList title="好きなジャンル" emoji="🎭" items={stats.genreRanking} />
