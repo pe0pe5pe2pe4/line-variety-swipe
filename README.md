@@ -1,5 +1,22 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## Stripe（課金）テストモード
+
+プレミアム（月額480円）の決済は Stripe Checkout を使用します。テストモードで動作確認するには、Vercel の環境変数にテストキーを設定してください。
+
+- `STRIPE_SECRET_KEY` … `sk_test_...`
+- `STRIPE_WEBHOOK_SECRET` … `whsec_...`（Stripe ダッシュボードで `/api/stripe-webhook` を登録して取得）
+- `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` … `pk_test_...`
+
+### テスト用カード番号
+
+| 用途 | 番号 | 補足 |
+| --- | --- | --- |
+| 成功 | `4242 4242 4242 4242` | 有効期限は未来の任意日付・CVCは任意3桁 |
+| 失敗（カード拒否） | `4000 0000 0000 9995` | 残高不足エラーを再現 |
+
+`STRIPE_SECRET_KEY` が未設定の場合、`/api/create-checkout-session` は 503 と分かりやすいエラーメッセージを返し、クライアントはモックのプレミアム付与にフォールバックします。
+
 ## Web Push（プッシュ通知）の VAPID 鍵生成
 
 毎日18時JST（Cron `0 9 * * *`）に `/api/send-notifications` がおすすめ番組TOP3を配信します。

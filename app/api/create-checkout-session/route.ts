@@ -11,7 +11,15 @@ export async function POST(request: Request) {
   if (!rl.ok) return rateLimited(rl.retryAfter);
 
   const stripe = getStripe();
-  if (!stripe) return NextResponse.json({ error: 'Stripe not configured' }, { status: 500 });
+  if (!stripe) {
+    return NextResponse.json(
+      {
+        error: 'STRIPE_SECRET_KEY が未設定です。Vercel の環境変数に Stripe のシークレットキー（テストは sk_test_...）を設定してください。',
+        code: 'stripe_not_configured',
+      },
+      { status: 503 }
+    );
+  }
 
   let body: { user_id?: string };
   try {
