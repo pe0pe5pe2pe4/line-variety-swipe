@@ -14,6 +14,7 @@ import Paywall from '@/components/Paywall';
 import { Content } from '@/lib/types';
 import { fetchWithRetry } from '@/lib/fetch-retry';
 import { FREE_WATCHLATER_LIMIT } from '@/lib/premium';
+import { captureError } from '@/lib/monitoring';
 
 const DUMMY_USER_ID = 'test-user-001';
 const ONBOARDING_KEY = 'onboarding_done';
@@ -463,6 +464,18 @@ export default function Home() {
     } catch {
       // 無視
     }
+  }, []);
+
+  // クライアントの未捕捉エラーを監視へ送る
+  useEffect(() => {
+    const onError = (e: ErrorEvent) => captureError(e.error ?? e.message, { type: 'window.onerror' });
+    const onRejection = (e: PromiseRejectionEvent) => captureError(e.reason, { type: 'unhandledrejection' });
+    window.addEventListener('error', onError);
+    window.addEventListener('unhandledrejection', onRejection);
+    return () => {
+      window.removeEventListener('error', onError);
+      window.removeEventListener('unhandledrejection', onRejection);
+    };
   }, []);
 
   // ── ローディング：userId または onboardingDone が未確定 ──

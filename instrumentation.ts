@@ -28,3 +28,16 @@ export async function register() {
     console.log('[env-check] 必須環境変数は揃っています');
   }
 }
+
+// サーバー側（Route Handler / RSC）で発生したエラーを捕捉して監視へ送る。
+export async function onRequestError(
+  error: unknown,
+  request: { path?: string; method?: string }
+) {
+  try {
+    const { captureError } = await import('@/lib/monitoring');
+    captureError(error, { path: request?.path, method: request?.method, runtime: 'server' });
+  } catch {
+    console.error('[monitor] onRequestError', error);
+  }
+}

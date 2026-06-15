@@ -4,6 +4,7 @@ import { type Content, hasValidThumbnail } from '@/lib/types';
 import { inferGenre, resolveGenre } from '@/lib/genre';
 import { rateLimit, rateLimited } from '@/lib/rate-limit';
 import { isPremiumActive } from '@/lib/premium';
+import { captureError, trackApiTiming } from '@/lib/monitoring';
 
 // ───────────────────────────────────────────────
 // キーワード抽出ユーティリティ
@@ -758,9 +759,10 @@ export async function GET(request: Request) {
   };
   cacheSet(cacheKey, result, headers);
 
-  console.log(`[recommend] total ${Date.now() - reqStart}ms (items=${result.length})`);
+  trackApiTiming('recommend', Date.now() - reqStart);
   return NextResponse.json(result, { headers: { ...headers, 'X-Cache': 'MISS' } });
   } catch (e) {
+    captureError(e, { api: 'recommend' });
     return NextResponse.json(
       { error: 'recommend failed', detail: String(e) },
       { status: 500 }

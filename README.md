@@ -35,6 +35,10 @@ npx web-push generate-vapid-keys
 
 `push_subscriptions` テーブルが必要です（前段のSQL参照）。
 
+## エラー監視（Sentry・任意）
+
+`SENTRY_DSN`（クライアント送信用は `NEXT_PUBLIC_SENTRY_DSN`）を設定すると、クライアント・サーバー両方の未捕捉エラーと「遅いAPI」アラートが Sentry に送信されます（軽量実装・無料プランで利用可）。未設定時はコンソールログのみで動作します。
+
 ## Getting Started
 
 First, run the development server:
