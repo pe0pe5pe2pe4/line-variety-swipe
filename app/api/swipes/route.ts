@@ -1,6 +1,13 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import { rateLimit, rateLimited } from '@/lib/rate-limit';
+import {
+  FREE_DAILY_SWIPE_LIMIT,
+  isPremiumActive,
+  jstDateString,
+  todaysSwipeCount,
+  type UserPremiumRow,
+} from '@/lib/premium';
 
 // あとで見るリスト: 右スワイプしたコンテンツ一覧を返す
 export async function GET(request: Request) {
@@ -49,10 +56,42 @@ export async function POST(request: Request) {
   const rl = rateLimit(request);
   if (!rl.ok) return rateLimited(rl.retryAfter);
 
-  const { user_id, content_id, direction } = await request.json();
+  const { user_id, content_id, direction, onboarding } = await request.json();
 
   if (!user_id || !content_id || !direction) {
     return NextResponse.json({ error: 'missing fields' }, { status: 400 });
+  }
+
+  // ── フリーミアム：日次スワイプ上限の判定（プレミアム列が無くても落ちないよう try/catch）──
+  let isPremium = false;
+  let dailyCount = 0;
+  let userRow: (UserPremiumRow & { id?: string }) | null = null;
+  try {
+    const { data } = await supabase
+      .from('users')
+      .select('id, is_premium, premium_until, daily_swipe_count, last_swipe_date')
+      .eq('line_user_id', user_id)
+      .maybeSingle();
+    userRow = (data as UserPremiumRow & { id?: string }) ?? null;
+    isPremium = isPremiumActive(userRow);
+    dailyCount = todaysSwipeCount(userRow);
+  } catch {
+    // プレミアム列が未作成などの場合はゲートせず通常動作にフォールバック
+    userRow = null;
+  }
+
+  // オンボーディング中のスワイプは上限にカウントしない
+  const counts = !onboarding;
+
+  // 無料ユーザーが上限到達 → スワイプを記録せず limitReached を返す
+  if (counts && userRow && !isPremium && dailyCount >= FREE_DAILY_SWIPE_LIMIT) {
+    return NextResponse.json({
+      success: false,
+      limitReached: true,
+      isPremium: false,
+      dailyCount,
+      limit: FREE_DAILY_SWIPE_LIMIT,
+    });
   }
 
   const { error } = await supabase.from('swipes').insert({
@@ -67,5 +106,25 @@ export async function POST(request: Request) {
     return NextResponse.json({ error }, { status: 500 });
   }
 
-  return NextResponse.json({ success: true });
+  // 日次カウントを更新（列が無ければ握りつぶす）
+  let newCount = dailyCount;
+  if (counts && userRow) {
+    newCount = dailyCount + 1;
+    try {
+      await supabase
+        .from('users')
+        .update({ daily_swipe_count: newCount, last_swipe_date: jstDateString() })
+        .eq('line_user_id', user_id);
+    } catch {
+      // プレミアム列未作成時は無視
+    }
+  }
+
+  return NextResponse.json({
+    success: true,
+    isPremium,
+    dailyCount: newCount,
+    limit: FREE_DAILY_SWIPE_LIMIT,
+    limitReached: counts && !isPremium && newCount >= FREE_DAILY_SWIPE_LIMIT,
+  });
 }

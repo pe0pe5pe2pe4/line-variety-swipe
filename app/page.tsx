@@ -9,8 +9,10 @@ import SkeletonCard from '@/components/SkeletonCard';
 import SwipeHints from '@/components/SwipeHints';
 import PushPrompt from '@/components/PushPrompt';
 import InstallBanner from '@/components/InstallBanner';
+import Paywall from '@/components/Paywall';
 import { Content } from '@/lib/types';
 import { fetchWithRetry } from '@/lib/fetch-retry';
+import { FREE_WATCHLATER_LIMIT } from '@/lib/premium';
 
 const DUMMY_USER_ID = 'test-user-001';
 const ONBOARDING_KEY = 'onboarding_done';
@@ -62,6 +64,9 @@ export default function Home() {
   const [loadError, setLoadError] = useState(false);
   // 1回でもスワイプしたか（「あなたへのおすすめ」バッジの表示判定）
   const [hasSwipedOnce, setHasSwipedOnce] = useState(false);
+  // フリーミアム状態
+  const [isPremium, setIsPremium] = useState(false);
+  const [swipeLimitReached, setSwipeLimitReached] = useState(false);
 
   // 無限スワイプ用：これまで表示したIDを記録し、追加取得時に除外する
   const seenSet = useRef<Set<string>>(new Set());
@@ -170,6 +175,19 @@ export default function Home() {
     setOnboardingDone(done);
   }, []);
 
+  // フリーミアム状態の取得（課金状態・本日のスワイプ上限）
+  useEffect(() => {
+    if (!userId) return;
+    fetch(`/api/me?user_id=${encodeURIComponent(userId)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (!d || d.error) return;
+        setIsPremium(!!d.isPremium);
+        setSwipeLimitReached(!!d.limitReached);
+      })
+      .catch(() => {});
+  }, [userId]);
+
   // コンテンツ取得（userId と onboardingDone 両方が揃ってから・初回のみ）
   useEffect(() => {
     if (!userId || !onboardingDone) return;
@@ -265,7 +283,13 @@ export default function Home() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: userId, content_id: content.id, direction }),
-      }).catch(() => {});
+      })
+        .then((r) => r.json())
+        .then((d) => {
+          if (d?.isPremium) setIsPremium(true);
+          if (d?.limitReached) setSwipeLimitReached(true);
+        })
+        .catch(() => {});
     }
   };
 
@@ -374,6 +398,13 @@ export default function Home() {
                   })}
                   {/* 初回起動時のみ操作説明 */}
                   <SwipeHints />
+                  {/* 無料ユーザーの日次スワイプ上限 */}
+                  {swipeLimitReached && !isPremium && (
+                    <Paywall
+                      userId={userId}
+                      onUpgraded={() => { setIsPremium(true); setSwipeLimitReached(false); }}
+                    />
+                  )}
                 </div>
 
                 <p className="mt-4 text-slate-500 text-xs">{contents.length} 本残り</p>
@@ -394,12 +425,33 @@ export default function Home() {
                 <div className="w-10 h-10 rounded-full border-4 border-indigo-400 border-t-transparent animate-spin" />
               </div>
             ) : (
-              <WatchLaterList
-                items={watchLater}
-                onShowDetail={handleShowDetail}
-                onWatchNow={openWatchNow}
-                onRemove={removeFromWatchLater}
-              />
+              <>
+                {/* 無料ユーザーは5件まで */}
+                {!isPremium && watchLater.length > FREE_WATCHLATER_LIMIT && (
+                  <div className="w-full max-w-sm mx-auto px-4 mb-3">
+                    <div className="bg-amber-500/15 border border-amber-500/30 rounded-2xl p-3 text-center">
+                      <p className="text-amber-200 text-xs">
+                        無料プランは {FREE_WATCHLATER_LIMIT} 件まで表示。残り {watchLater.length - FREE_WATCHLATER_LIMIT} 件はプレミアムで解放
+                      </p>
+                      <button
+                        onClick={() => userId && fetch('/api/upgrade-premium', {
+                          method: 'POST', headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ user_id: userId }),
+                        }).then((r) => { if (r.ok) setIsPremium(true); }).catch(() => {})}
+                        className="mt-2 px-4 py-1.5 bg-amber-400 text-black rounded-full text-xs font-bold active:scale-95 transition-transform"
+                      >
+                        プレミアムにアップグレード
+                      </button>
+                    </div>
+                  </div>
+                )}
+                <WatchLaterList
+                  items={isPremium ? watchLater : watchLater.slice(0, FREE_WATCHLATER_LIMIT)}
+                  onShowDetail={handleShowDetail}
+                  onWatchNow={openWatchNow}
+                  onRemove={removeFromWatchLater}
+                />
+              </>
             )}
           </div>
         )}

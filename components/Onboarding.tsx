@@ -56,7 +56,7 @@ export default function Onboarding({ userId, onComplete }: Props) {
     fetch('/api/swipes', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: userId, content_id: content.id, direction }),
+      body: JSON.stringify({ user_id: userId, content_id: content.id, direction, onboarding: true }),
     }).catch(() => {});
 
     if (next.length === 0 || newSwiped >= ONBOARDING_COUNT) {

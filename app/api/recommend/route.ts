@@ -3,6 +3,7 @@ import { supabase, timed } from '@/lib/supabase';
 import { type Content, hasValidThumbnail } from '@/lib/types';
 import { inferGenre, resolveGenre } from '@/lib/genre';
 import { rateLimit, rateLimited } from '@/lib/rate-limit';
+import { isPremiumActive } from '@/lib/premium';
 
 // ───────────────────────────────────────────────
 // キーワード抽出ユーティリティ
@@ -62,6 +63,7 @@ type Profile = {
   cooldownGenre?: string; // 直近に偏ったジャンル → 一時的に下げる
   timeBoostGenres?: Set<string>; // 時間帯別に優先するジャンル
   cfBoostIds?: Set<string>; // 協調フィルタリングで優先する番組ID
+  premium?: boolean; // プレミアム：精度UP・新着優先
 };
 
 const W_GENRE = 3;
@@ -119,9 +121,9 @@ function scoreWithProfile(c: Content, p: Profile): number {
   // 時間帯別ブースト（TASK3）
   if (p.timeBoostGenres?.has(genre)) score += 1.5;
   // 協調フィルタリング：似たユーザーが好んだ番組（TASK3）
-  if (p.cfBoostIds?.has(c.id)) score += 2;
-  // 鮮度スコア：7日以内は加点 / 30日以上は減点（TASK3）
-  score += freshnessBonus((c as { created_at?: string }).created_at);
+  if (p.cfBoostIds?.has(c.id)) score += p.premium ? 3 : 2;
+  // 鮮度スコア：7日以内は加点 / 30日以上は減点（プレミアムは新着を強めに優先）
+  score += freshnessBonus((c as { created_at?: string }).created_at) * (p.premium ? 2 : 1);
   return score;
 }
 
@@ -651,6 +653,17 @@ export async function GET(request: Request) {
   profile.cooldownGenre = cooldownGenre;
   profile.timeBoostGenres = timeBoostGenresForNow();
   profile.cfBoostIds = await collaborativeBoostIds(userId, rightSwipeIds);
+  // プレミアム判定（精度UP・新着優先）。列が無くても落ちないよう try/catch。
+  try {
+    const { data: u } = await supabase
+      .from('users')
+      .select('is_premium, premium_until')
+      .eq('line_user_id', userId)
+      .maybeSingle();
+    profile.premium = isPremiumActive(u as { is_premium?: boolean | null; premium_until?: string | null } | null);
+  } catch {
+    profile.premium = false;
+  }
 
   // ── STEP 3: 混在比率を決定（2段階パーソナライズ）──
   let tvRatio: number;
