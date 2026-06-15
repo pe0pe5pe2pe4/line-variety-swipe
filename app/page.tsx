@@ -9,6 +9,7 @@ import SkeletonCard from '@/components/SkeletonCard';
 import SwipeHints from '@/components/SwipeHints';
 import PushPrompt from '@/components/PushPrompt';
 import InstallBanner from '@/components/InstallBanner';
+import OfflineBanner from '@/components/OfflineBanner';
 import Paywall from '@/components/Paywall';
 import { Content } from '@/lib/types';
 import { fetchWithRetry } from '@/lib/fetch-retry';
@@ -40,6 +41,25 @@ function saveSwipedIds(uid: string, ids: string[]) {
     localStorage.setItem(swipedKey(uid), JSON.stringify(ids.slice(-1000)));
   } catch {
     // ストレージ不可時は無視
+  }
+}
+
+// オフライン用に直近のコンテンツをキャッシュする
+const CONTENT_CACHE_KEY = 'cached_contents';
+function saveContentCache(items: unknown[]) {
+  try {
+    localStorage.setItem(CONTENT_CACHE_KEY, JSON.stringify(items.slice(0, 30)));
+  } catch {
+    // 無視
+  }
+}
+function loadContentCache(): unknown[] {
+  try {
+    const raw = localStorage.getItem(CONTENT_CACHE_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
   }
 }
 
@@ -150,10 +170,21 @@ export default function Home() {
         exhausted.current = true;
         setReachedEnd(true);
       }
-      setContents((prev) => (initial ? fresh : [...prev, ...fresh]));
+      setContents((prev) => {
+        const updated = initial ? fresh : [...prev, ...fresh];
+        saveContentCache(updated); // オフライン用キャッシュ
+        return updated;
+      });
     } catch {
-      // 3回リトライしても失敗 → エラー表示（手動で再試行できる）
-      setLoadError(true);
+      // 3回リトライしても失敗（オフライン等）→ キャッシュがあれば表示、無ければエラー
+      const cached = loadContentCache() as Content[];
+      if (initial && cached.length > 0) {
+        cached.forEach((c) => c?.id && markSeen(c.id));
+        setContents(cached);
+        setLoadError(false);
+      } else {
+        setLoadError(true);
+      }
     } finally {
       loadingMore.current = false;
       if (initial) setLoading(false);
@@ -633,6 +664,9 @@ export default function Home() {
 
       {/* PWA ホーム画面追加バナー */}
       <InstallBanner />
+
+      {/* オフライン検知バナー（復帰時に自動リロード） */}
+      <OfflineBanner />
     </>
   );
 }

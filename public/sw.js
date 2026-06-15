@@ -3,7 +3,8 @@
 // - オフライン時のフォールバック画面（PWA対応）
 
 const OFFLINE_URL = '/offline.html';
-const CACHE = 'baraoshi-v1';
+const CACHE = 'baraoshi-v2';
+const API_CACHE = 'baraoshi-api-v2';
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((c) => c.add(OFFLINE_URL)));
@@ -13,18 +14,35 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))
+      Promise.all(keys.filter((k) => k !== CACHE && k !== API_CACHE).map((k) => caches.delete(k)))
     )
   );
   self.clients.claim();
 });
 
-// ページ遷移（navigation）がオフラインで失敗したらフォールバックを返す
 self.addEventListener('fetch', (event) => {
-  if (event.request.mode !== 'navigate') return;
-  event.respondWith(
-    fetch(event.request).catch(() => caches.match(OFFLINE_URL))
-  );
+  const req = event.request;
+  if (req.method !== 'GET') return;
+  const url = new URL(req.url);
+
+  // ページ遷移：オフラインならフォールバック画面
+  if (req.mode === 'navigate') {
+    event.respondWith(fetch(req).catch(() => caches.match(OFFLINE_URL)));
+    return;
+  }
+
+  // /api/recommend：network-first → オフライン時は直近キャッシュを返す
+  if (url.origin === self.location.origin && url.pathname === '/api/recommend') {
+    event.respondWith(
+      fetch(req)
+        .then((res) => {
+          const copy = res.clone();
+          caches.open(API_CACHE).then((c) => c.put(req, copy)).catch(() => {});
+          return res;
+        })
+        .catch(() => caches.match(req).then((c) => c || caches.match(API_CACHE)))
+    );
+  }
 });
 
 // Push 受信
