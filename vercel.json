@@ -9,6 +9,7 @@
     { "path": "/api/enrich-contents?limit=20", "schedule": "0 23 * * *" },
     { "path": "/api/find-previews?limit=20", "schedule": "0 2 * * *" },
     { "path": "/api/grow-discovery", "schedule": "30 2 * * *" },
+    { "path": "/api/backfill-yt-views?limit=300", "schedule": "0 3 * * *" },
     { "path": "/api/backfill-genre", "schedule": "30 23 * * *" },
     { "path": "/api/send-notifications", "schedule": "0 9 * * *" },
     { "path": "/api/update-quality-scores", "schedule": "0 1 * * *" },

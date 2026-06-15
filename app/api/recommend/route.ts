@@ -72,6 +72,11 @@ const W_STATION = 2;
 const W_KEYWORD = 1;
 const PENALTY_DISLIKED_GENRE = 1.5;
 
+// YouTubeの「知らないけど面白い」ミドル帯（数万〜数十万再生）
+const YT_SWEET_MIN = 20_000;
+const YT_SWEET_MAX = 800_000;
+const YT_SWEET_TARGET = 120_000;
+
 function topKey(weights: Record<string, number>): string | undefined {
   const entries = Object.entries(weights);
   if (entries.length === 0) return undefined;
@@ -127,6 +132,12 @@ function scoreWithProfile(c: Content, p: Profile): number {
   score += freshnessBonus((c as { created_at?: string }).created_at) * (p.premium ? 2 : 1);
   // 品質スコアが高いほど上位に（TASK5）
   score += (typeof c.quality_score === 'number' ? c.quality_score : 0.5) * 3;
+  // YouTubeは「数万〜数十万再生」のミドル帯を少し優遇（無名すぎ/有名すぎは控えめ）
+  if (c.content_type === 'youtube' && typeof c.yt_view_count === 'number' && c.yt_view_count >= 0) {
+    const v = c.yt_view_count;
+    if (v >= YT_SWEET_MIN && v <= YT_SWEET_MAX) score += 2;
+    else if (v > YT_SWEET_MAX * 6) score -= 1; // 数百万超の有名すぎは少し下げる
+  }
   return score;
 }
 
@@ -774,18 +785,35 @@ export async function GET(request: Request) {
   const exposure = await candidateExposure(candAll.map((c) => c.id));
   const usedIds = new Set(forYou.map((c) => c.id));
   const likedChannels = new Set(Object.keys(profile.stationWeights));
+  // YouTube は「数万〜数十万再生」のミドル帯を発掘の本命にする（無名すぎ/有名すぎを避ける）
+  const inSweetBand = (c: Content): boolean => {
+    if (c.content_type !== 'youtube') return false;
+    const v = c.yt_view_count;
+    if (typeof v !== 'number' || v < 0) return false; // 未取得/取得不可
+    return v >= YT_SWEET_MIN && v <= YT_SWEET_MAX;
+  };
   const gemRank = (c: Content): number => {
     const ch = (c.channel_name ?? '').trim();
-    if (ch && likedChannels.has(ch)) return 0; // 好きなチャンネルの別動画（当たり学習）
-    if (!profile.topGenre || resolveGenre(c) !== profile.topGenre) return 1; // 別ジャンルのセレンディピティ
-    return 2;
+    if (ch && likedChannels.has(ch)) return 0;       // 好きなチャンネルの別動画（当たり学習）
+    if (inSweetBand(c)) return 1;                     // 数万〜数十万の「知らないけど面白い」帯
+    if (!profile.topGenre || resolveGenre(c) !== profile.topGenre) return 2; // 別ジャンルのセレンディピティ
+    return 3;
+  };
+  // ミドル帯の中心(目標再生数)に近いほど良い。帯外/未知は最後。
+  const bandScore = (c: Content): number => {
+    const v = c.yt_view_count;
+    if (typeof v !== 'number' || v < 0) return Number.MAX_SAFE_INTEGER;
+    return Math.abs(v - YT_SWEET_TARGET);
   };
   const gemPool = candAll
     .filter((c) => !usedIds.has(c.id))
     .sort((a, b) => {
       const r = gemRank(a) - gemRank(b);
       if (r !== 0) return r;
-      return (exposure.get(a.id) ?? 0) - (exposure.get(b.id) ?? 0); // 露出が少ない＝未発掘を優先
+      // 同ランク内は「目標再生数に近い→露出が少ない」順
+      const bs = bandScore(a) - bandScore(b);
+      if (bs !== 0) return bs;
+      return (exposure.get(a.id) ?? 0) - (exposure.get(b.id) ?? 0);
     });
   const gems = capPerChannel(gemPool, 2).slice(0, gemCount);
   const gemIds = new Set(gems.map((c) => c.id));

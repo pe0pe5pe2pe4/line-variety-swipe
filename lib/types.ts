@@ -28,6 +28,8 @@ export type Content = {
   // コンテンツ品質スコア（0-1）
   quality_score?: number | null;
   created_at?: string | null;
+  // YouTube実再生数（発掘のミドル帯=数万〜数十万 を選ぶのに使用）
+  yt_view_count?: number | null;
   // 発掘枠（露出の少ない＝まだ知られていない候補）か
   discovery?: boolean;
 };
