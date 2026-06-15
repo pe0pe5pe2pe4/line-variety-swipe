@@ -8,6 +8,7 @@
     { "path": "/api/enrich-contents?limit=20", "schedule": "0 23 * * *" },
     { "path": "/api/backfill-genre", "schedule": "30 23 * * *" },
     { "path": "/api/send-notifications", "schedule": "0 9 * * *" },
+    { "path": "/api/update-quality-scores", "schedule": "0 1 * * *" },
     { "path": "/api/dedupe-contents", "schedule": "0 0 * * 0" }
   ]
 }

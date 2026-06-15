@@ -23,6 +23,9 @@ export type Content = {
   cast_names?: string[] | null;
   // クリック数（view_count）
   view_count?: number;
+  // コンテンツ品質スコア（0-1）
+  quality_score?: number | null;
+  created_at?: string | null;
 };
 
 const PLACEHOLDER_IMG = 'https://placehold.co/400x600/1a1a2e/ffffff?text=No+Image';

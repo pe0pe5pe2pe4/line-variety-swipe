@@ -124,6 +124,8 @@ function scoreWithProfile(c: Content, p: Profile): number {
   if (p.cfBoostIds?.has(c.id)) score += p.premium ? 3 : 2;
   // 鮮度スコア：7日以内は加点 / 30日以上は減点（プレミアムは新着を強めに優先）
   score += freshnessBonus((c as { created_at?: string }).created_at) * (p.premium ? 2 : 1);
+  // 品質スコアが高いほど上位に（TASK5）
+  score += (typeof c.quality_score === 'number' ? c.quality_score : 0.5) * 3;
   return score;
 }
 
@@ -451,6 +453,8 @@ function dedupeByTitle(list: Content[], excludeTitles: Set<string>): Content[] {
     // 画像が無い/no_image/placehold はスワイプ候補から完全除外（TASK6）
     if (!hasValidThumbnail(c.thumbnail_url)) continue;
     if ((c.description ?? '').trim().length < MIN_DESC_LEN) continue;
+    // 品質スコアが低い（0.3未満）コンテンツは表示しない（TASK5）
+    if (typeof c.quality_score === 'number' && c.quality_score < 0.3) continue;
     if (excludeTitles.has(key) || seen.has(key)) continue;
     seen.add(key);
     result.push(c);
