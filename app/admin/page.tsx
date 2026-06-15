@@ -15,9 +15,20 @@ type Overview = {
   totals: { users: number; swipes: number; clicks: number; contents: number };
   contents: ContentRow[];
 };
+type Analytics = {
+  dau: number;
+  mau: number;
+  avgSessionSec: number;
+  retention: { d1: number | null; d7: number | null; d30: number | null };
+  conversionRate: number;
+  affiliateClickRate: number;
+  premiumUsers: number;
+  totalUsers: number;
+};
 
 export default function AdminPage() {
   const [data, setData] = useState<Overview | null>(null);
+  const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [msg, setMsg] = useState('');
   const [service, setService] = useState('unext');
   const [baseUrl, setBaseUrl] = useState('');
@@ -27,6 +38,10 @@ export default function AdminPage() {
       .then((r) => r.json())
       .then((d) => setData(d?.error ? null : d))
       .catch(() => setData(null));
+    fetch('/api/admin/analytics')
+      .then((r) => r.json())
+      .then((d) => setAnalytics(d?.error ? null : d))
+      .catch(() => setAnalytics(null));
   };
   useEffect(load, []);
 
@@ -55,6 +70,22 @@ export default function AdminPage() {
         <p>読み込み中...</p>
       ) : (
         <>
+          {analytics && (
+            <section style={{ margin: '12px 0' }}>
+              <h2>アナリティクス</h2>
+              <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                <Stat label="DAU" value={analytics.dau} />
+                <Stat label="MAU" value={analytics.mau} />
+                <Stat label="平均セッション(秒)" value={analytics.avgSessionSec} />
+                <Stat label="翌日リテンション(%)" value={analytics.retention.d1 ?? 0} />
+                <Stat label="7日リテンション(%)" value={analytics.retention.d7 ?? 0} />
+                <Stat label="30日リテンション(%)" value={analytics.retention.d30 ?? 0} />
+                <Stat label="プレミアム転換率(%)" value={analytics.conversionRate} />
+                <Stat label="アフィリクリック率(%)" value={analytics.affiliateClickRate} />
+              </div>
+            </section>
+          )}
+
           <section style={{ display: 'flex', gap: 16, flexWrap: 'wrap', margin: '12px 0' }}>
             <Stat label="ユーザー数" value={data.totals.users} />
             <Stat label="スワイプ数" value={data.totals.swipes} />

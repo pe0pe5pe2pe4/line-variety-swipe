@@ -79,6 +79,10 @@ export default function Home() {
   const exhausted = useRef(false);
   // localStorage に保存するスワイプ済みID
   const swipedIds = useRef<string[]>([]);
+  // セッション追跡
+  const sessionId = useRef<string | null>(null);
+  const sessionSwipes = useRef<number>(0);
+  const inactivityTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const markSeen = (id: string) => {
     if (seenSet.current.has(id)) return;
@@ -189,6 +193,49 @@ export default function Home() {
     }
   }, []);
 
+  // セッション追跡（起動時に開始・離脱/30分無操作で終了）
+  useEffect(() => {
+    if (!userId) return;
+    let active = true;
+
+    const endSession = () => {
+      const id = sessionId.current;
+      if (!id) return;
+      sessionId.current = null;
+      try {
+        fetch('/api/session', {
+          method: 'POST',
+          keepalive: true,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'end', session_id: id, swipe_count: sessionSwipes.current }),
+        }).catch(() => {});
+      } catch {
+        // 無視
+      }
+    };
+
+    fetch('/api/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'start', user_id: userId }),
+    })
+      .then((r) => r.json())
+      .then((d) => { if (active && d?.session_id) sessionId.current = d.session_id; })
+      .catch(() => {});
+
+    const onHidden = () => { if (document.visibilityState === 'hidden') endSession(); };
+    document.addEventListener('visibilitychange', onHidden);
+    window.addEventListener('pagehide', endSession);
+
+    return () => {
+      active = false;
+      document.removeEventListener('visibilitychange', onHidden);
+      window.removeEventListener('pagehide', endSession);
+      if (inactivityTimer.current) clearTimeout(inactivityTimer.current);
+      endSession();
+    };
+  }, [userId]);
+
   // フリーミアム状態の取得（課金状態・本日のスワイプ上限）
   useEffect(() => {
     if (!userId) return;
@@ -273,8 +320,24 @@ export default function Home() {
     }
   };
 
+  const endSessionNow = () => {
+    const id = sessionId.current;
+    if (!id) return;
+    sessionId.current = null;
+    fetch('/api/session', {
+      method: 'POST',
+      keepalive: true,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'end', session_id: id, swipe_count: sessionSwipes.current }),
+    }).catch(() => {});
+  };
+
   const handleSwipe = (direction: 'left' | 'right' | 'up', content: Content) => {
     if (!hasSwipedOnce) setHasSwipedOnce(true);
+    // セッションのスワイプ数を加算し、30分無操作タイマーをリセット
+    sessionSwipes.current += 1;
+    if (inactivityTimer.current) clearTimeout(inactivityTimer.current);
+    inactivityTimer.current = setTimeout(endSessionNow, 30 * 60 * 1000);
     setContents((prev) => {
       const next = prev.filter((c) => c.id !== content.id);
       // 残りが少なくなったら自動で追加取得（無限スワイプ）
