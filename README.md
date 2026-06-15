@@ -1,5 +1,23 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## Web Push（プッシュ通知）の VAPID 鍵生成
+
+毎日18時JST（Cron `0 9 * * *`）に `/api/send-notifications` がおすすめ番組TOP3を配信します。
+事前に VAPID 鍵を生成して環境変数に設定してください。
+
+```bash
+npx web-push generate-vapid-keys
+```
+
+出力された Public/Private キーを Vercel の環境変数に設定します:
+
+- `NEXT_PUBLIC_VAPID_PUBLIC_KEY` … Public Key（クライアントの購読登録に使用）
+- `VAPID_PUBLIC_KEY` … Public Key（サーバー送信用・上と同値でOK）
+- `VAPID_PRIVATE_KEY` … Private Key
+- `VAPID_SUBJECT` …（任意）`mailto:you@example.com`
+
+`push_subscriptions` テーブルが必要です（前段のSQL参照）。
+
 ## Getting Started
 
 First, run the development server:

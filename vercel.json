@@ -7,6 +7,7 @@
     { "path": "/api/enrich-contents?limit=20", "schedule": "0 23 * * *" },
     { "path": "/api/backfill-genre", "schedule": "0 0 * * *" },
     { "path": "/api/ingest?batch=0", "schedule": "0 1 * * *" },
-    { "path": "/api/ingest?batch=1", "schedule": "30 1 * * *" }
+    { "path": "/api/ingest?batch=1", "schedule": "30 1 * * *" },
+    { "path": "/api/send-notifications", "schedule": "0 9 * * *" }
   ]
 }
