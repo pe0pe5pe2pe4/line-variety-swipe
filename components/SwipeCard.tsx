@@ -1,5 +1,5 @@
 'use client';
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { useSpring, animated } from '@react-spring/web';
 import { useDrag } from '@use-gesture/react';
 import { Content, getDisplayDescription, extractYouTubeId } from '@/lib/types';
@@ -96,6 +96,8 @@ export default function SwipeCard({ content, onSwipe, onShowDetail, isTop, featu
   // YouTube は本編、Tver/番組は検索で見つけた公式クリップ（'none'は画像のまま）。
   const ytId = extractYouTubeId(content.youtube_url) ?? extractYouTubeId(content.preview_youtube_url);
   const showVideo = isTop && !!ytId;
+  // インライン動画の音声（自動再生はミュート必須／タップでアンミュート）
+  const [muted, setMuted] = useState(true);
   const genre = content.genre ?? inferGenre(content);
   const station = content.channel_name?.trim();
   const meta = [content.episode_number, content.broadcast_date]
@@ -134,11 +136,13 @@ export default function SwipeCard({ content, onSwipe, onShowDetail, isTop, featu
         />
 
         {/* YouTube インライン動画プレビュー（先頭カードのみ・ミュート自動再生・
-            pointer-events:none でスワイプ操作を阻害しない） */}
+            pointer-events:none でスワイプ操作を阻害しない。アンミュートで音声再生） */}
         {showVideo && (
           <iframe
+            // muted を切り替えると src が変わり、ユーザー操作後なので音声付きで再生される
+            key={muted ? 'muted' : 'sound'}
             className="absolute inset-0 w-full h-full pointer-events-none"
-            src={`https://www.youtube.com/embed/${ytId}?autoplay=1&mute=1&playsinline=1&controls=0&loop=1&playlist=${ytId}&rel=0&modestbranding=1&disablekb=1&fs=0`}
+            src={`https://www.youtube.com/embed/${ytId}?autoplay=1&mute=${muted ? 1 : 0}&playsinline=1&controls=0&loop=1&playlist=${ytId}&rel=0&modestbranding=1&disablekb=1&fs=0`}
             title={content.title}
             allow="autoplay; encrypted-media"
             loading="eager"
@@ -146,8 +150,12 @@ export default function SwipeCard({ content, onSwipe, onShowDetail, isTop, featu
           />
         )}
 
-        {/* 上下グラデーションオーバーレイ */}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/10 to-black/40 pointer-events-none" />
+        {/* 上下グラデーションオーバーレイ（動画再生中は没入感のため薄め） */}
+        <div
+          className={`absolute inset-0 pointer-events-none bg-gradient-to-t ${
+            showVideo ? 'from-black/70 via-transparent to-black/10' : 'from-black/90 via-black/10 to-black/40'
+          }`}
+        />
 
         {/* バッジ（左上） */}
         {(featured || content.discovery || content.recommend_reason) && (
@@ -182,11 +190,16 @@ export default function SwipeCard({ content, onSwipe, onShowDetail, isTop, featu
           </div>
         )}
 
-        {/* 動画プレビュー中のミュート表示（タップで詳細→全画面再生） */}
+        {/* 音声トグル（タップでアンミュート／ミュート） */}
         {showVideo && (
-          <div className="absolute top-4 right-4 bg-black/60 text-white text-xs font-bold px-2 py-1 rounded-full pointer-events-none">
-            🔇 タップで再生
-          </div>
+          <button
+            onPointerDown={(e) => { e.stopPropagation(); }}
+            onClick={(e) => { e.stopPropagation(); setMuted((m) => !m); }}
+            aria-label={muted ? '音を出す' : 'ミュート'}
+            className="absolute top-4 right-4 z-10 bg-black/60 text-white text-sm font-bold w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-transform"
+          >
+            {muted ? '🔇' : '🔊'}
+          </button>
         )}
 
         {/* LIKE badge（大） */}
@@ -237,8 +250,8 @@ export default function SwipeCard({ content, onSwipe, onShowDetail, isTop, featu
             )}
           </div>
 
-          {/* 番組名（大・白・太字） */}
-          <h2 className="text-white text-3xl font-black leading-tight line-clamp-2 drop-shadow-lg">
+          {/* 番組名（動画再生中はTikTok風に小さめ1行・タイトルを主役にしない） */}
+          <h2 className={`text-white font-black leading-tight drop-shadow-lg ${showVideo ? 'text-lg line-clamp-1' : 'text-3xl line-clamp-2'}`}>
             {content.title}
           </h2>
 
@@ -249,7 +262,8 @@ export default function SwipeCard({ content, onSwipe, onShowDetail, isTop, featu
             <p className="text-slate-200 text-xs truncate">{meta}</p>
           ) : null}
 
-          {getDisplayDescription(content) ? (
+          {/* 概要は動画再生中は非表示（視聴の邪魔をしない） */}
+          {!showVideo && getDisplayDescription(content) ? (
             <p className="text-slate-300 text-sm line-clamp-2">{getDisplayDescription(content)}</p>
           ) : null}
 
