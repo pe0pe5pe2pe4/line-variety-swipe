@@ -46,3 +46,19 @@ export function resolveGenre(c: GenreSource & { genre?: string | null }): string
   const stored = (c.genre ?? '').trim();
   return stored || inferGenre(c);
 }
+
+// ジャンルタグの配色（Tailwind クラス）
+const GENRE_COLORS: Record<string, string> = {
+  'お笑い・バラエティ': 'bg-yellow-400 text-black',
+  'トーク': 'bg-blue-500 text-white',
+  '情報・ワイドショー': 'bg-cyan-500 text-white',
+  'ドッキリ・企画': 'bg-red-500 text-white',
+  'グルメ・旅': 'bg-orange-500 text-white',
+  '音楽': 'bg-purple-500 text-white',
+  'スポーツ': 'bg-green-500 text-white',
+  'その他': 'bg-slate-500 text-white',
+};
+
+export function genreColorClass(genre: string): string {
+  return GENRE_COLORS[genre] ?? 'bg-indigo-500 text-white';
+}

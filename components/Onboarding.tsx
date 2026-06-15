@@ -39,11 +39,11 @@ export default function Onboarding({ userId, onComplete }: Props) {
 
   const finish = () => {
     setPhase('finishing');
-    // 「フィードを作成中...」を一瞬挟んでからメインへ
+    // 「あなたのフィードを作成中...」を3秒挟んでからメインへ
     window.setTimeout(() => {
       localStorage.setItem(ONBOARDING_KEY, '1');
       onComplete();
-    }, 1600);
+    }, 3000);
   };
 
   const handleSwipe = (direction: 'left' | 'right' | 'up', content: Content) => {
@@ -73,8 +73,9 @@ export default function Onboarding({ userId, onComplete }: Props) {
   if (phase === 'finishing') {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-slate-900 to-indigo-950 px-4">
+        <div className="text-6xl mb-4 animate-bounce">🎬</div>
         <div className="w-14 h-14 rounded-full border-4 border-indigo-400 border-t-transparent animate-spin" />
-        <p className="mt-6 text-white text-lg font-bold">フィードを作成中...</p>
+        <p className="mt-6 text-white text-lg font-bold">あなたのフィードを作成中...</p>
         <p className="mt-2 text-slate-400 text-sm">あなた好みの番組を集めています</p>
       </div>
     );

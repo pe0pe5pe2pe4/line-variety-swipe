@@ -6,6 +6,7 @@ import DetailModal from '@/components/DetailModal';
 import WatchLaterList from '@/components/WatchLaterList';
 import MyPage, { Stats, ReferralInfo } from '@/components/MyPage';
 import SkeletonCard from '@/components/SkeletonCard';
+import SwipeHints from '@/components/SwipeHints';
 import PushPrompt from '@/components/PushPrompt';
 import InstallBanner from '@/components/InstallBanner';
 import { Content } from '@/lib/types';
@@ -58,6 +59,8 @@ export default function Home() {
   const [reachedEnd, setReachedEnd] = useState(false);
   // 取得に失敗したか（再試行ボタンの表示判定）
   const [loadError, setLoadError] = useState(false);
+  // 1回でもスワイプしたか（「あなたへのおすすめ」バッジの表示判定）
+  const [hasSwipedOnce, setHasSwipedOnce] = useState(false);
 
   // 無限スワイプ用：これまで表示したIDを記録し、追加取得時に除外する
   const seenSet = useRef<Set<string>>(new Set());
@@ -211,6 +214,7 @@ export default function Home() {
   }, [activeTab, userId]);
 
   const handleSwipe = (direction: 'left' | 'right' | 'up', content: Content) => {
+    if (!hasSwipedOnce) setHasSwipedOnce(true);
     setContents((prev) => {
       const next = prev.filter((c) => c.id !== content.id);
       // 残りが少なくなったら自動で追加取得（無限スワイプ）
@@ -349,10 +353,13 @@ export default function Home() {
                           onSwipe={(dir) => handleSwipe(dir, content)}
                           onShowDetail={() => handleShowDetail(content)}
                           isTop={isTop}
+                          featured={isTop && !hasSwipedOnce}
                         />
                       </div>
                     );
                   })}
+                  {/* 初回起動時のみ操作説明 */}
+                  <SwipeHints />
                 </div>
 
                 <p className="mt-4 text-slate-500 text-xs">{contents.length} 本残り</p>

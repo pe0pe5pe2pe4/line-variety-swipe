@@ -3,7 +3,7 @@ import { useRef } from 'react';
 import { useSpring, animated } from '@react-spring/web';
 import { useDrag } from '@use-gesture/react';
 import { Content, getDisplayDescription } from '@/lib/types';
-import { inferGenre } from '@/lib/genre';
+import { inferGenre, genreColorClass } from '@/lib/genre';
 import ContentImage from './ContentImage';
 import ShareButton from './ShareButton';
 
@@ -12,11 +12,12 @@ type Props = {
   onSwipe: (direction: 'left' | 'right' | 'up') => void;
   onShowDetail: () => void;
   isTop: boolean;
+  featured?: boolean;
 };
 
 const SWIPE_THRESHOLD = 100;
 
-export default function SwipeCard({ content, onSwipe, onShowDetail, isTop }: Props) {
+export default function SwipeCard({ content, onSwipe, onShowDetail, isTop, featured }: Props) {
   const [{ x, y, rotate, opacity }, api] = useSpring(() => ({
     x: 0,
     y: 0,
@@ -88,6 +89,7 @@ export default function SwipeCard({ content, onSwipe, onShowDetail, isTop }: Pro
   const nowOpacity  = y.to((v) => Math.max(0, Math.min(1, -v / SWIPE_THRESHOLD)));
 
   const isYoutube = content.content_type === 'youtube';
+  const isTver = content.content_type === 'tver';
   const genre = content.genre ?? inferGenre(content);
   const station = content.channel_name?.trim();
   const meta = [content.episode_number, content.broadcast_date]
@@ -126,11 +128,18 @@ export default function SwipeCard({ content, onSwipe, onShowDetail, isTop }: Pro
         <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/10 to-black/40 pointer-events-none" />
 
         {/* 推薦理由（あれば左上に小さく表示） */}
-        {content.recommend_reason && (
-          <div className="absolute top-4 left-4 right-4 pointer-events-none">
-            <span className="inline-block bg-indigo-500/85 text-white text-xs font-bold px-3 py-1 rounded-full backdrop-blur-sm">
-              💡 {content.recommend_reason}
-            </span>
+        {(featured || content.recommend_reason) && (
+          <div className="absolute top-4 left-4 right-4 flex flex-wrap gap-2 pointer-events-none">
+            {featured && (
+              <span className="inline-block bg-amber-400 text-black text-xs font-black px-3 py-1 rounded-full shadow">
+                ⭐ あなたへのおすすめ
+              </span>
+            )}
+            {content.recommend_reason && (
+              <span className="inline-block bg-indigo-500/85 text-white text-xs font-bold px-3 py-1 rounded-full backdrop-blur-sm">
+                💡 {content.recommend_reason}
+              </span>
+            )}
           </div>
         )}
 
@@ -171,12 +180,16 @@ export default function SwipeCard({ content, onSwipe, onShowDetail, isTop }: Pro
         <div className="absolute inset-x-0 bottom-0 p-5 pb-6 flex flex-col gap-2">
           {/* ジャンル / 放送局タグ */}
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs font-bold text-white bg-indigo-500/90 px-2.5 py-0.5 rounded-full">
+            <span className={`text-xs font-black px-2.5 py-0.5 rounded-full ${genreColorClass(genre)}`}>
               #{genre}
             </span>
             {isYoutube ? (
-              <span className="text-xs font-bold text-white bg-red-600/90 px-2.5 py-0.5 rounded-full">
-                ▶ YouTube
+              <span className="text-xs font-bold text-white bg-red-600 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                <span className="text-[13px]">▶</span> YouTube
+              </span>
+            ) : isTver ? (
+              <span className="text-xs font-black text-white bg-green-600 px-2.5 py-0.5 rounded-full">
+                TVer
               </span>
             ) : (
               station && (
@@ -188,7 +201,7 @@ export default function SwipeCard({ content, onSwipe, onShowDetail, isTop }: Pro
           </div>
 
           {/* 番組名（大・白・太字） */}
-          <h2 className="text-white text-2xl font-black leading-tight line-clamp-2 drop-shadow-lg">
+          <h2 className="text-white text-3xl font-black leading-tight line-clamp-2 drop-shadow-lg">
             {content.title}
           </h2>
 
