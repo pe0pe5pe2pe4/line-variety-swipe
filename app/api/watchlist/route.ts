@@ -53,3 +53,27 @@ export async function GET(request: Request) {
 
   return NextResponse.json(sorted);
 }
+
+// あとで見るリストから削除（該当コンテンツの right スワイプを取り消す）
+// DELETE /api/watchlist?user_id=...&content_id=...
+export async function DELETE(request: Request) {
+  const rl = rateLimit(request);
+  if (!rl.ok) return rateLimited(rl.retryAfter);
+
+  const { searchParams } = new URL(request.url);
+  const userId = searchParams.get('user_id');
+  const contentId = searchParams.get('content_id');
+  if (!userId || !contentId) {
+    return NextResponse.json({ error: 'user_id and content_id required' }, { status: 400 });
+  }
+
+  const { error } = await supabase
+    .from('swipes')
+    .delete()
+    .eq('user_id', userId)
+    .eq('content_id', contentId)
+    .eq('direction', 'right');
+
+  if (error) return NextResponse.json({ error }, { status: 500 });
+  return NextResponse.json({ success: true });
+}

@@ -14,7 +14,8 @@ import { fetchWithRetry } from '@/lib/fetch-retry';
 
 const DUMMY_USER_ID = 'test-user-001';
 const ONBOARDING_KEY = 'onboarding_done';
-const PRELOAD_COUNT = 3;
+// プリロードするカード枚数（3→5）
+const PRELOAD_COUNT = 5;
 // 残りがこの枚数以下になったら自動で追加取得（無限スワイプ・プリフェッチ）
 const LOW_WATERMARK = 6;
 // exclude クエリに載せる直近表示IDの上限（URL肥大を防ぐ）
@@ -213,6 +214,27 @@ export default function Home() {
       .catch(() => setReferral(null));
   }, [activeTab, userId]);
 
+  // 上スワイプ／「今すぐ見る」の遷移先（厳密制御・ABEMAには絶対飛ばない）
+  // youtube → youtube_url / tver → tver_url / tv_show・未設定 → Tver検索
+  const openWatchNow = (content: Content) => {
+    if (content.content_type === 'youtube' && content.youtube_url) {
+      window.open(content.youtube_url, '_blank');
+    } else if (content.content_type === 'tver' && content.tver_url) {
+      window.open(content.tver_url, '_blank');
+    } else {
+      window.open(`https://tver.jp/search/#${encodeURIComponent(content.title)}`, '_blank');
+    }
+  };
+
+  const removeFromWatchLater = (content: Content) => {
+    setWatchLater((prev) => prev.filter((c) => c.id !== content.id));
+    if (userId) {
+      fetch(`/api/watchlist?user_id=${encodeURIComponent(userId)}&content_id=${encodeURIComponent(content.id)}`, {
+        method: 'DELETE',
+      }).catch(() => {});
+    }
+  };
+
   const handleSwipe = (direction: 'left' | 'right' | 'up', content: Content) => {
     if (!hasSwipedOnce) setHasSwipedOnce(true);
     setContents((prev) => {
@@ -225,15 +247,7 @@ export default function Home() {
     });
 
     if (direction === 'up') {
-      // 上スワイプの遷移先（厳密制御・ABEMAには絶対に飛ばない / バグ5）
-      // youtube → youtube_url / tver → tver_url / tv_show・未設定 → Tver検索
-      if (content.content_type === 'youtube' && content.youtube_url) {
-        window.open(content.youtube_url, '_blank');
-      } else if (content.content_type === 'tver' && content.tver_url) {
-        window.open(content.tver_url, '_blank');
-      } else {
-        window.open(`https://tver.jp/search/#${encodeURIComponent(content.title)}`, '_blank');
-      }
+      openWatchNow(content);
     }
 
     if (direction === 'right') {
@@ -380,7 +394,12 @@ export default function Home() {
                 <div className="w-10 h-10 rounded-full border-4 border-indigo-400 border-t-transparent animate-spin" />
               </div>
             ) : (
-              <WatchLaterList items={watchLater} onShowDetail={handleShowDetail} />
+              <WatchLaterList
+                items={watchLater}
+                onShowDetail={handleShowDetail}
+                onWatchNow={openWatchNow}
+                onRemove={removeFromWatchLater}
+              />
             )}
           </div>
         )}

@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // APIレスポンス等を gzip 圧縮（Vercel でも有効）
+  compress: true,
   images: {
     // Next.js 16: qualities must be allow-listed explicitly
     qualities: [75],

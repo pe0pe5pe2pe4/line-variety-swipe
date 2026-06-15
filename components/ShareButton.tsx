@@ -9,13 +9,11 @@ type Props = {
 /** 番組カードのシェアボタン。Web Share API → 無ければ LINE 共有にフォールバック */
 export default function ShareButton({ content, className }: Props) {
   const buildShareText = () => {
-    const liffId = process.env.NEXT_PUBLIC_LIFF_ID;
-    const url =
-      liffId && liffId !== 'dummy'
-        ? `https://liff.line.me/${liffId}`
-        : typeof window !== 'undefined'
-          ? window.location.origin
-          : '';
+    // 番組詳細ページ(/show/[id])を共有 → OGPに番組サムネイルが表示される
+    const base =
+      process.env.NEXT_PUBLIC_SITE_URL ||
+      (typeof window !== 'undefined' ? window.location.origin : '');
+    const url = base ? `${base}/show/${content.id}` : '';
     // アフィリエイトリンクがあればシェアテキストにも含める（収益最大化）
     const affiliate = content.vod_affiliate_url?.trim();
     const affiliateLine = affiliate ? `\n▶ 視聴はこちら: ${affiliate}` : '';

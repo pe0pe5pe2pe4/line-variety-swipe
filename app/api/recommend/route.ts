@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { supabase, timed } from '@/lib/supabase';
 import type { Content } from '@/lib/types';
 import { inferGenre, resolveGenre } from '@/lib/genre';
 import { rateLimit, rateLimited } from '@/lib/rate-limit';
@@ -572,13 +572,17 @@ export async function GET(request: Request) {
     .map((s) => s.trim())
     .filter(Boolean);
 
+  const reqStart = Date.now();
   try {
   // ── STEP 1: スワイプ履歴取得 ──
-  const { data: allSwipes } = await supabase
-    .from('swipes')
-    .select('content_id, direction, created_at')
-    .eq('user_id', userId)
-    .order('created_at', { ascending: false });
+  const { data: allSwipes } = await timed(
+    'recommend.swipes',
+    supabase
+      .from('swipes')
+      .select('content_id, direction, created_at')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+  );
 
   const swipedIdSet = new Set<string>([
     ...(allSwipes ?? []).map((s) => s.content_id as string),
@@ -664,12 +668,15 @@ export async function GET(request: Request) {
   // ── STEP 4: 全ソースから並列取得 ──
   // 0-9スワイプ：DBのキャッシュ済みYouTube（API呼び出しなし）
   // 10+スワイプ：リアルタイムYouTube API検索
-  const [tvShows, ytVideos] = await Promise.all([
-    fetchTVShows(swipedIds, swipedTitles, profile, tvCount + ytCount),
-    rightSwipeCount < 10
-      ? fetchStoredYouTubeVideos(swipedIds, swipedTitles, ytCount)
-      : fetchYouTubeVideos(keywords, swipedIds, swipedTitles, ytCount),
-  ]);
+  const [tvShows, ytVideos] = await timed(
+    'recommend.fetchContents',
+    Promise.all([
+      fetchTVShows(swipedIds, swipedTitles, profile, tvCount + ytCount),
+      rightSwipeCount < 10
+        ? fetchStoredYouTubeVideos(swipedIds, swipedTitles, ytCount)
+        : fetchYouTubeVideos(keywords, swipedIds, swipedTitles, ytCount),
+    ])
+  );
 
   // YouTube が足りない場合は TV で補完
   const actualYtCount = ytVideos.length;
@@ -704,6 +711,7 @@ export async function GET(request: Request) {
   };
   cacheSet(cacheKey, result, headers);
 
+  console.log(`[recommend] total ${Date.now() - reqStart}ms (items=${result.length})`);
   return NextResponse.json(result, { headers: { ...headers, 'X-Cache': 'MISS' } });
   } catch (e) {
     return NextResponse.json(
