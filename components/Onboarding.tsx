@@ -4,7 +4,7 @@ import SwipeCard from './SwipeCard';
 import { Content } from '@/lib/types';
 
 const ONBOARDING_KEY = 'onboarding_done';
-const ONBOARDING_COUNT = 20;
+const ONBOARDING_COUNT = 8;
 
 type Props = {
   userId: string;
@@ -39,11 +39,15 @@ export default function Onboarding({ userId, onComplete }: Props) {
 
   const finish = () => {
     setPhase('finishing');
-    // 「あなたのフィードを作成中...」を3秒挟んでからメインへ
-    window.setTimeout(() => {
-      localStorage.setItem(ONBOARDING_KEY, '1');
-      onComplete();
-    }, 3000);
+    // 完了をサーバーにも記録（localStorageが消えても再オンボーディングを防ぐ）
+    fetch('/api/complete-onboarding', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: userId }),
+    }).catch(() => {});
+    localStorage.setItem(ONBOARDING_KEY, '1');
+    // 短い演出だけ挟んで素早くメインへ（壁にしない）
+    window.setTimeout(() => onComplete(), 700);
   };
 
   const handleSwipe = (direction: 'left' | 'right' | 'up', content: Content) => {

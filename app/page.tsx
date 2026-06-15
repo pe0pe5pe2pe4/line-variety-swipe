@@ -18,8 +18,8 @@ import { captureError } from '@/lib/monitoring';
 
 const DUMMY_USER_ID = 'test-user-001';
 const ONBOARDING_KEY = 'onboarding_done';
-// プリロードするカード枚数（3→5）
-const PRELOAD_COUNT = 5;
+// プリロードするカード枚数（描画コスト軽減のため3枚）
+const PRELOAD_COUNT = 3;
 // 残りがこの枚数以下になったら自動で追加取得（無限スワイプ・プリフェッチ）
 const LOW_WATERMARK = 6;
 // exclude クエリに載せる直近表示IDの上限（URL肥大を防ぐ）
@@ -92,8 +92,6 @@ export default function Home() {
   const [swipeLimitReached, setSwipeLimitReached] = useState(false);
   // A/Bテスト群
   const [abGroup, setAbGroup] = useState<'A' | 'B'>('A');
-  // スワイプ済みIDをSupabaseから読み込み済みか（コンテンツ初回取得のゲート）
-  const [swipedLoaded, setSwipedLoaded] = useState(false);
 
   // 無限スワイプ用：これまで表示したIDを記録し、追加取得時に除外する
   const seenSet = useRef<Set<string>>(new Set());
@@ -124,7 +122,6 @@ export default function Home() {
       swipedIds.current = ids;
       ids.forEach(markSeen);
       if (backup) saveSwipedIds(userId, ids); // 補助的に保存
-      setSwipedLoaded(true);
     };
 
     fetch(`/api/get-swiped?user_id=${encodeURIComponent(userId)}`)
@@ -307,16 +304,20 @@ export default function Home() {
         setIsPremium(!!d.isPremium);
         setSwipeLimitReached(!!d.limitReached);
         if (d.abGroup === 'B') setAbGroup('B');
+        // サーバーがオンボーディング済みと言えば、localStorageが消えていても再表示しない
+        if (d.onboarded) setOnboardingDone(true);
       })
       .catch(() => {});
   }, [userId]);
 
-  // コンテンツ取得（userId・onboardingDone・スワイプ済みID取得が揃ってから・初回のみ）
+  // コンテンツ取得（userId・onboardingDone が揃えば即開始＝最初の1枚を最速で出す）。
+  // スワイプ済み除外は recommend がサーバー側でも行うため swipedLoaded は待たない。
+  // get-swiped はクライアントの二重防御として並行で seenSet に反映される。
   useEffect(() => {
-    if (!userId || !onboardingDone || !swipedLoaded) return;
+    if (!userId || !onboardingDone) return;
     loadMore(userId, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId, onboardingDone, swipedLoaded]);
+  }, [userId, onboardingDone]);
 
   // あとで見るリストをロード（タブ切替時）
   // 楽観的に追加済みのローカル項目はサーバー結果とマージして消えないようにする
