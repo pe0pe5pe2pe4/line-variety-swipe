@@ -15,11 +15,13 @@ type Props = {
   featured?: boolean;
   // A/Bテスト: 'B' は「今すぐ見る」ボタンを常時大きく表示
   variant?: 'A' | 'B';
+  // 次の1枚を裏で先読み（動画を事前バッファしてスワイプを軽快に）
+  preload?: boolean;
 };
 
 const SWIPE_THRESHOLD = 100;
 
-export default function SwipeCard({ content, onSwipe, onShowDetail, isTop, featured, variant = 'A' }: Props) {
+export default function SwipeCard({ content, onSwipe, onShowDetail, isTop, featured, variant = 'A', preload = false }: Props) {
   const [{ x, y, rotate, opacity }, api] = useSpring(() => ({
     x: 0,
     y: 0,
@@ -95,7 +97,10 @@ export default function SwipeCard({ content, onSwipe, onShowDetail, isTop, featu
   // 先頭カードはインライン動画プレビュー（ミュート自動再生）。
   // YouTube は本編、Tver/番組は検索で見つけた公式クリップ（'none'は画像のまま）。
   const ytId = extractYouTubeId(content.youtube_url) ?? extractYouTubeId(content.preview_youtube_url);
-  const showVideo = isTop && !!ytId;
+  // 先頭(再生)＋次の1枚(先読み)で iframe をマウント。次が先頭に来た瞬間に再生済みにする。
+  const renderVideo = (isTop || preload) && !!ytId;
+  // 没入レイアウト(テキスト最小化・グラデ薄め)は先頭カードのみ
+  const immersive = isTop && renderVideo;
   // インライン動画の音声（自動再生はミュート必須／タップでアンミュート）
   const [muted, setMuted] = useState(true);
   const genre = content.genre ?? inferGenre(content);
@@ -137,7 +142,7 @@ export default function SwipeCard({ content, onSwipe, onShowDetail, isTop, featu
 
         {/* YouTube インライン動画プレビュー（先頭カードのみ・ミュート自動再生・
             pointer-events:none でスワイプ操作を阻害しない。アンミュートで音声再生） */}
-        {showVideo && (
+        {renderVideo && (
           <iframe
             // muted を切り替えると src が変わり、ユーザー操作後なので音声付きで再生される
             key={muted ? 'muted' : 'sound'}
@@ -153,7 +158,7 @@ export default function SwipeCard({ content, onSwipe, onShowDetail, isTop, featu
         {/* 上下グラデーションオーバーレイ（動画再生中は没入感のため薄め） */}
         <div
           className={`absolute inset-0 pointer-events-none bg-gradient-to-t ${
-            showVideo ? 'from-black/70 via-transparent to-black/10' : 'from-black/90 via-black/10 to-black/40'
+            immersive ? 'from-black/70 via-transparent to-black/10' : 'from-black/90 via-black/10 to-black/40'
           }`}
         />
 
@@ -182,7 +187,7 @@ export default function SwipeCard({ content, onSwipe, onShowDetail, isTop, featu
         )}
 
         {/* YouTube play icon（中央）＝動画プレビュー中は非表示 */}
-        {isYoutube && !showVideo && (
+        {isYoutube && !renderVideo && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <div className="w-20 h-20 flex items-center justify-center bg-red-600/80 rounded-full shadow-lg">
               <span className="text-white text-4xl ml-1">▶</span>
@@ -191,7 +196,7 @@ export default function SwipeCard({ content, onSwipe, onShowDetail, isTop, featu
         )}
 
         {/* 音声トグル（タップでアンミュート／ミュート） */}
-        {showVideo && (
+        {isTop && renderVideo && (
           <button
             onPointerDown={(e) => { e.stopPropagation(); }}
             onClick={(e) => { e.stopPropagation(); setMuted((m) => !m); }}
@@ -251,7 +256,7 @@ export default function SwipeCard({ content, onSwipe, onShowDetail, isTop, featu
           </div>
 
           {/* 番組名（動画再生中はTikTok風に小さめ1行・タイトルを主役にしない） */}
-          <h2 className={`text-white font-black leading-tight drop-shadow-lg ${showVideo ? 'text-lg line-clamp-1' : 'text-3xl line-clamp-2'}`}>
+          <h2 className={`text-white font-black leading-tight drop-shadow-lg ${immersive ? 'text-lg line-clamp-1' : 'text-3xl line-clamp-2'}`}>
             {content.title}
           </h2>
 
@@ -263,7 +268,7 @@ export default function SwipeCard({ content, onSwipe, onShowDetail, isTop, featu
           ) : null}
 
           {/* 概要は動画再生中は非表示（視聴の邪魔をしない） */}
-          {!showVideo && getDisplayDescription(content) ? (
+          {!immersive && getDisplayDescription(content) ? (
             <p className="text-slate-300 text-sm line-clamp-2">{getDisplayDescription(content)}</p>
           ) : null}
 

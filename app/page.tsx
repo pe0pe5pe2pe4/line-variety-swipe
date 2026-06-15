@@ -611,6 +611,7 @@ export default function Home() {
                           isTop={isTop}
                           featured={isTop && !hasSwipedOnce}
                           variant={abGroup}
+                          preload={i === 1}
                         />
                       </div>
                     );

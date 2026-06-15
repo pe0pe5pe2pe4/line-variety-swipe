@@ -49,6 +49,14 @@ export default function RootLayout({
       lang="ja"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
+      <head>
+        {/* YouTube 埋め込みの接続を事前に温めて、動画再生開始を速くする */}
+        <link rel="preconnect" href="https://www.youtube.com" />
+        <link rel="preconnect" href="https://i.ytimg.com" />
+        <link rel="preconnect" href="https://www.google.com" />
+        <link rel="preconnect" href="https://googleads.g.doubleclick.net" />
+        <link rel="dns-prefetch" href="https://www.youtube.com" />
+      </head>
       <body className="min-h-full flex flex-col">{children}</body>
     </html>
   );
