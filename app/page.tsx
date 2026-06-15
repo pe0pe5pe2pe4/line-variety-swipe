@@ -71,6 +71,8 @@ export default function Home() {
   const [swipeLimitReached, setSwipeLimitReached] = useState(false);
   // A/Bテスト群
   const [abGroup, setAbGroup] = useState<'A' | 'B'>('A');
+  // スワイプ済みIDをSupabaseから読み込み済みか（コンテンツ初回取得のゲート）
+  const [swipedLoaded, setSwipedLoaded] = useState(false);
 
   // 無限スワイプ用：これまで表示したIDを記録し、追加取得時に除外する
   const seenSet = useRef<Set<string>>(new Set());
@@ -90,12 +92,39 @@ export default function Home() {
     seenOrder.current.push(id);
   };
 
-  // 起動時に localStorage からスワイプ済みIDを読み込み、除外対象に反映する（バグ1）
+  // 起動時に Supabase からスワイプ済みIDを取得して除外対象に反映する。
+  // localStorage は Supabase が落ちた場合の補助フォールバックのみ。
   useEffect(() => {
     if (!userId) return;
-    const stored = loadSwipedIds(userId);
-    swipedIds.current = stored;
-    stored.forEach(markSeen);
+    let cancelled = false;
+
+    const seed = (ids: string[], backup: boolean) => {
+      if (cancelled) return;
+      swipedIds.current = ids;
+      ids.forEach(markSeen);
+      if (backup) saveSwipedIds(userId, ids); // 補助的に保存
+      setSwipedLoaded(true);
+    };
+
+    fetch(`/api/get-swiped?user_id=${encodeURIComponent(userId)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return;
+        const ids: string[] = Array.isArray(d?.contentIds) ? d.contentIds : [];
+        if (ids.length > 0) {
+          seed(ids, true);
+        } else {
+          // Supabaseが空 → 念のため localStorage も併用（移行期の保険）
+          seed(loadSwipedIds(userId), false);
+        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        // Supabase 取得失敗 → localStorage フォールバック
+        seed(loadSwipedIds(userId), false);
+      });
+
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
@@ -250,12 +279,12 @@ export default function Home() {
       .catch(() => {});
   }, [userId]);
 
-  // コンテンツ取得（userId と onboardingDone 両方が揃ってから・初回のみ）
+  // コンテンツ取得（userId・onboardingDone・スワイプ済みID取得が揃ってから・初回のみ）
   useEffect(() => {
-    if (!userId || !onboardingDone) return;
+    if (!userId || !onboardingDone || !swipedLoaded) return;
     loadMore(userId, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId, onboardingDone]);
+  }, [userId, onboardingDone, swipedLoaded]);
 
   // あとで見るリストをロード（タブ切替時）
   // 楽観的に追加済みのローカル項目はサーバー結果とマージして消えないようにする
