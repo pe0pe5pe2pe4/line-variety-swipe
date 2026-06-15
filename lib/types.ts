@@ -30,6 +30,13 @@ export type Content = {
   discovery?: boolean;
 };
 
+// YouTube の各種URL形式から動画IDを取り出す（watch?v= / youtu.be/ / embed/ 等）
+export function extractYouTubeId(url: string | undefined | null): string | null {
+  if (!url) return null;
+  const m = url.match(/(?:v=|youtu\.be\/|embed\/|shorts\/)([A-Za-z0-9_-]{11})/);
+  return m ? m[1] : null;
+}
+
 const PLACEHOLDER_IMG = 'https://placehold.co/400x600/1a1a2e/ffffff?text=No+Image';
 
 /** サムネイルとして利用可能な実画像URLがあるか判定 */

@@ -2,7 +2,7 @@
 import { useRef } from 'react';
 import { useSpring, animated } from '@react-spring/web';
 import { useDrag } from '@use-gesture/react';
-import { Content, getDisplayDescription } from '@/lib/types';
+import { Content, getDisplayDescription, extractYouTubeId } from '@/lib/types';
 import { inferGenre, genreColorClass } from '@/lib/genre';
 import ContentImage from './ContentImage';
 import ShareButton from './ShareButton';
@@ -92,6 +92,9 @@ export default function SwipeCard({ content, onSwipe, onShowDetail, isTop, featu
 
   const isYoutube = content.content_type === 'youtube';
   const isTver = content.content_type === 'tver';
+  // 先頭カードかつ YouTube ならインライン動画プレビュー（ミュート自動再生）
+  const ytId = isYoutube ? extractYouTubeId(content.youtube_url) : null;
+  const showVideo = isTop && !!ytId;
   const genre = content.genre ?? inferGenre(content);
   const station = content.channel_name?.trim();
   const meta = [content.episode_number, content.broadcast_date]
@@ -121,13 +124,26 @@ export default function SwipeCard({ content, onSwipe, onShowDetail, isTop, featu
     >
       {/* TikTok風 縦型フルスクリーンカード：画像全面 + 下部グラデにテキスト */}
       <div className="relative w-full h-full rounded-3xl shadow-2xl overflow-hidden bg-black">
-        {/* フルスクリーンサムネイル（object-cover） */}
+        {/* フルスクリーンサムネイル（object-cover）＝動画読込前のポスター */}
         <ContentImage
           src={content.thumbnail_url}
           alt={content.title}
           channelName={content.channel_name}
           eager={isTop}
         />
+
+        {/* YouTube インライン動画プレビュー（先頭カードのみ・ミュート自動再生・
+            pointer-events:none でスワイプ操作を阻害しない） */}
+        {showVideo && (
+          <iframe
+            className="absolute inset-0 w-full h-full pointer-events-none"
+            src={`https://www.youtube.com/embed/${ytId}?autoplay=1&mute=1&playsinline=1&controls=0&loop=1&playlist=${ytId}&rel=0&modestbranding=1&disablekb=1&fs=0`}
+            title={content.title}
+            allow="autoplay; encrypted-media"
+            loading="eager"
+            referrerPolicy="strict-origin-when-cross-origin"
+          />
+        )}
 
         {/* 上下グラデーションオーバーレイ */}
         <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/10 to-black/40 pointer-events-none" />
@@ -156,12 +172,19 @@ export default function SwipeCard({ content, onSwipe, onShowDetail, isTop, featu
           </div>
         )}
 
-        {/* YouTube play icon（中央） */}
-        {isYoutube && (
+        {/* YouTube play icon（中央）＝動画プレビュー中は非表示 */}
+        {isYoutube && !showVideo && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <div className="w-20 h-20 flex items-center justify-center bg-red-600/80 rounded-full shadow-lg">
               <span className="text-white text-4xl ml-1">▶</span>
             </div>
+          </div>
+        )}
+
+        {/* 動画プレビュー中のミュート表示（タップで詳細→全画面再生） */}
+        {showVideo && (
+          <div className="absolute top-4 right-4 bg-black/60 text-white text-xs font-bold px-2 py-1 rounded-full pointer-events-none">
+            🔇 タップで再生
           </div>
         )}
 
