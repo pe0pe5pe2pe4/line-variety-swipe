@@ -18,8 +18,8 @@ type Row = {
  * 事前に以下のSQLで genre カラムを追加しておくこと:
  *   ALTER TABLE contents ADD COLUMN IF NOT EXISTS genre text;
  *
- * クエリ ?only_empty=1 で genre が未設定の行のみ対象（デフォルトは全行を再計算）。
- * 認証は CRON_SECRET（Authorization: Bearer <CRON_SECRET>）。
+ * デフォルトは genre が未設定(null/空)の行のみ対象（TASK6）。
+ * ?all=1 で全行を再計算。認証は CRON_SECRET。
  */
 export async function GET(request: Request) {
   const authHeader = request.headers.get('authorization');
@@ -29,7 +29,14 @@ export async function GET(request: Request) {
   }
 
   const { searchParams } = new URL(request.url);
-  const onlyEmpty = searchParams.get('only_empty') === '1';
+  // デフォルトで未設定のみ対象。?all=1 で全件再計算。
+  const onlyEmpty = searchParams.get('all') !== '1';
+
+  // 処理前の genre null 件数
+  const { count: genreNullBefore } = await supabase
+    .from('contents')
+    .select('id', { count: 'exact', head: true })
+    .is('genre', null);
 
   const pageSize = 1000;
   const chunkSize = 50;
@@ -72,9 +79,16 @@ export async function GET(request: Request) {
     from += pageSize;
   }
 
+  const { count: genreNullAfter } = await supabase
+    .from('contents')
+    .select('id', { count: 'exact', head: true })
+    .is('genre', null);
+
   return NextResponse.json({
     updated,
     onlyEmpty,
+    genreNullBefore: genreNullBefore ?? null,
+    genreNullAfter: genreNullAfter ?? null,
     errors: errors.length ? errors : undefined,
   });
 }

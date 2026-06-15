@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { supabase, timed } from '@/lib/supabase';
-import type { Content } from '@/lib/types';
+import { type Content, hasValidThumbnail } from '@/lib/types';
 import { inferGenre, resolveGenre } from '@/lib/genre';
 import { rateLimit, rateLimited } from '@/lib/rate-limit';
 
@@ -446,6 +446,8 @@ function dedupeByTitle(list: Content[], excludeTitles: Set<string>): Content[] {
   for (const c of list) {
     const key = normalizeTitle(c.title);
     if (!key) continue;
+    // 画像が無い/no_image/placehold はスワイプ候補から完全除外（TASK6）
+    if (!hasValidThumbnail(c.thumbnail_url)) continue;
     if ((c.description ?? '').trim().length < MIN_DESC_LEN) continue;
     if (excludeTitles.has(key) || seen.has(key)) continue;
     seen.add(key);
