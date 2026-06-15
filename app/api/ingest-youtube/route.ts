@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
-import { TV_CHANNELS, COMEDIAN_CHANNELS, ChannelConfig } from '@/lib/youtube-channels';
+import { TV_CHANNELS, COMEDIAN_CHANNELS, DISCOVERY_CHANNELS, ChannelConfig } from '@/lib/youtube-channels';
 
 export const maxDuration = 25;
 
@@ -229,12 +229,13 @@ export async function GET(request: Request) {
   }
 
   const { searchParams } = new URL(request.url);
-  // batch=0: テレビ局公式（再生回数上位、Cronデフォルト）
-  // batch=1: 芸人チャンネル（最新順）
+  // batch=0: テレビ局公式 / batch=1: 芸人チャンネル / batch=2: 発掘（地下芸人・深夜・無名）
   const batch = parseInt(searchParams.get('batch') ?? '0', 10);
 
-  const targetChannels = batch === 1 ? COMEDIAN_CHANNELS : TV_CHANNELS;
-  const batchLabel = batch === 1 ? '芸人チャンネル' : 'テレビ局公式';
+  const targetChannels =
+    batch === 2 ? DISCOVERY_CHANNELS : batch === 1 ? COMEDIAN_CHANNELS : TV_CHANNELS;
+  const batchLabel =
+    batch === 2 ? '発掘チャンネル' : batch === 1 ? '芸人チャンネル' : 'テレビ局公式';
 
   let totalInserted = 0;
   let totalSkipped = 0;
@@ -266,6 +267,6 @@ export async function GET(request: Request) {
     totalSkipped,
     channels: channelResults,
     errors: errors.length > 0 ? errors : undefined,
-    nextBatch: batch === 0 ? 1 : null,
+    nextBatch: batch === 0 ? 1 : batch === 1 ? 2 : null,
   });
 }

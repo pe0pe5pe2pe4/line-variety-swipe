@@ -3,7 +3,7 @@ export type ChannelConfig = {
   id?: string;          // channel ID (UC...) if known
   searchQuery?: string; // find channel ID by name search → then fetch videos
   videoQuery?: string;  // direct video keyword search (no channel ID)
-  category: 'tv_official' | 'comedian';
+  category: 'tv_official' | 'comedian' | 'discovery';
   order: 'viewCount' | 'date';
 };
 
@@ -84,5 +84,19 @@ export const COMEDIAN_CHANNELS: ChannelConfig[] = [
   },
 ];
 
+// 発掘チャンネル：埋もれた地下芸人・深夜番組・無名YouTuberを掘り起こす。
+// order:'date'（新着順＝再生回数バイアスが弱い）でキーワード直接検索し、
+// まだ知られていない動画を corpus に取り込む。
+export const DISCOVERY_CHANNELS: ChannelConfig[] = [
+  { name: '地下芸人', videoQuery: '地下芸人 ネタ ライブ', category: 'discovery', order: 'date' },
+  { name: 'インディーズ芸人', videoQuery: 'インディーズ芸人 漫才 コント', category: 'discovery', order: 'date' },
+  { name: '無名芸人ネタ', videoQuery: '無名 芸人 ネタ おもしろい', category: 'discovery', order: 'date' },
+  { name: '深夜番組', videoQuery: '深夜番組 バラエティ 神回', category: 'discovery', order: 'date' },
+  { name: '個人バラエティ', videoQuery: '個人 バラエティ 企画 おもしろ', category: 'discovery', order: 'date' },
+  { name: '若手お笑い', videoQuery: '若手 お笑い ネタ 初配信', category: 'discovery', order: 'date' },
+  { name: 'ローカル番組', videoQuery: 'ローカル番組 バラエティ おもしろ', category: 'discovery', order: 'date' },
+  { name: 'ドッキリ個人', videoQuery: 'ドッキリ 個人 企画 検証', category: 'discovery', order: 'date' },
+];
+
 // 後方互換（既存コードが YOUTUBE_CHANNELS をインポートしている箇所向け）
-export const YOUTUBE_CHANNELS: ChannelConfig[] = [...TV_CHANNELS, ...COMEDIAN_CHANNELS];
+export const YOUTUBE_CHANNELS: ChannelConfig[] = [...TV_CHANNELS, ...COMEDIAN_CHANNELS, ...DISCOVERY_CHANNELS];

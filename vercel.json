@@ -4,6 +4,7 @@
     { "path": "/api/ingest-tver?limit=20&offset=0", "schedule": "0 20 * * *" },
     { "path": "/api/ingest-youtube?batch=0", "schedule": "0 21 * * *" },
     { "path": "/api/ingest-youtube?batch=1", "schedule": "30 21 * * *" },
+    { "path": "/api/ingest-youtube?batch=2", "schedule": "45 21 * * *" },
     { "path": "/api/ingest-wikipedia?batch=0", "schedule": "0 22 * * 1" },
     { "path": "/api/enrich-contents?limit=20", "schedule": "0 23 * * *" },
     { "path": "/api/backfill-genre", "schedule": "30 23 * * *" },
