@@ -55,6 +55,8 @@ export default function Home() {
   const [modalContent, setModalContent] = useState<Content | null>(null);
   const [watchLater, setWatchLater] = useState<Content[]>([]);
   const [watchLaterLoading, setWatchLaterLoading] = useState(false);
+  // 友達が右スワイプした番組ID（「友達もいいね！」バッジ用）
+  const [friendLikedIds, setFriendLikedIds] = useState<Set<string>>(new Set());
   const [stats, setStats] = useState<Stats | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
   const [referral, setReferral] = useState<ReferralInfo | null>(null);
@@ -225,6 +227,11 @@ export default function Home() {
         setWatchLaterLoading(false);
       })
       .catch(() => setWatchLaterLoading(false));
+    // 友達のおすすめ（友達が右スワイプした番組）
+    fetch(`/api/friend-likes?user_id=${encodeURIComponent(userId)}`)
+      .then((r) => r.json())
+      .then((d) => setFriendLikedIds(new Set(Array.isArray(d?.contentIds) ? d.contentIds : [])))
+      .catch(() => {});
   }, [activeTab, userId]);
 
   // マイページ統計をロード（タブ切替時に最新化）
@@ -471,6 +478,7 @@ export default function Home() {
                 )}
                 <WatchLaterList
                   items={isPremium ? watchLater : watchLater.slice(0, FREE_WATCHLATER_LIMIT)}
+                  friendLikedIds={friendLikedIds}
                   onShowDetail={handleShowDetail}
                   onWatchNow={openWatchNow}
                   onRemove={removeFromWatchLater}

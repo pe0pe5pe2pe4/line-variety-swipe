@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { supabase } from '@/lib/supabase';
 import { getThumbnailSrc, hasValidThumbnail, type Content } from '@/lib/types';
+import Comments from '@/components/Comments';
 
 export const dynamic = 'force-dynamic';
 
@@ -91,6 +92,8 @@ export default async function ShowPage({ params }: { params: Promise<{ id: strin
         >
           バラ推しで他の番組も見る
         </a>
+
+        <Comments contentId={content.id} />
       </div>
     </main>
   );

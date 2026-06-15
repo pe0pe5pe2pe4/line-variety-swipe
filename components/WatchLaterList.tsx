@@ -6,12 +6,13 @@ import ContentImage from './ContentImage';
 
 type Props = {
   items: Content[];
+  friendLikedIds?: Set<string>;
   onShowDetail: (content: Content) => void;
   onWatchNow: (content: Content) => void;
   onRemove: (content: Content) => void;
 };
 
-export default function WatchLaterList({ items, onShowDetail, onWatchNow, onRemove }: Props) {
+export default function WatchLaterList({ items, friendLikedIds, onShowDetail, onWatchNow, onRemove }: Props) {
   const [genreFilter, setGenreFilter] = useState<string>('すべて');
 
   // 表示中のジャンル一覧
@@ -81,6 +82,11 @@ export default function WatchLaterList({ items, onShowDetail, onWatchNow, onRemo
             <button onClick={() => onShowDetail(item)} className="flex-1 min-w-0 text-left">
               <p className="text-white font-bold text-sm leading-tight line-clamp-2">{item.title}</p>
               <div className="flex flex-wrap gap-1.5 mt-1.5">
+                {friendLikedIds?.has(item.id) && (
+                  <span className="inline-block text-xs bg-pink-500/20 text-pink-300 px-2 py-0.5 rounded-full font-bold">
+                    👯 友達もいいね！
+                  </span>
+                )}
                 {hasAffiliate && (
                   <span className="inline-block text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full font-bold">
                     ⭐ おすすめ
