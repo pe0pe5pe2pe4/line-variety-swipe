@@ -90,6 +90,8 @@ export default function Home() {
   // フリーミアム状態
   const [isPremium, setIsPremium] = useState(false);
   const [swipeLimitReached, setSwipeLimitReached] = useState(false);
+  // 本日の残りスワイプ数（無料ユーザー用・null=プレミアム/不明）
+  const [remaining, setRemaining] = useState<number | null>(null);
   // A/Bテスト群
   const [abGroup, setAbGroup] = useState<'A' | 'B'>('A');
 
@@ -303,6 +305,7 @@ export default function Home() {
         if (!d || d.error) return;
         setIsPremium(!!d.isPremium);
         setSwipeLimitReached(!!d.limitReached);
+        setRemaining(d.isPremium ? null : (typeof d.remaining === 'number' ? d.remaining : null));
         if (d.abGroup === 'B') setAbGroup('B');
         // サーバーがオンボーディング済みと言えば、localStorageが消えていても再表示しない
         if (d.onboarded) setOnboardingDone(true);
@@ -431,8 +434,11 @@ export default function Home() {
       })
         .then((r) => r.json())
         .then((d) => {
-          if (d?.isPremium) setIsPremium(true);
-          if (d?.limitReached) setSwipeLimitReached(true);
+          if (d?.isPremium) { setIsPremium(true); setRemaining(null); }
+          if (d?.limitReached) { setSwipeLimitReached(true); setRemaining(0); }
+          else if (typeof d?.dailyCount === 'number' && typeof d?.limit === 'number' && !d?.isPremium) {
+            setRemaining(Math.max(0, d.limit - d.dailyCount));
+          }
         })
         .catch(() => {});
     }
@@ -539,8 +545,36 @@ export default function Home() {
               <>
                 <div className="w-full max-w-sm mb-4 text-center">
                   <h1 className="text-white text-2xl font-black tracking-tight">バラエティ発見</h1>
-                  <p className="text-slate-400 text-xs mt-1">タップで詳細 / 上スワイプで今すぐ見る</p>
+                  {!isPremium && remaining !== null ? (
+                    <p className="text-slate-400 text-xs mt-1">今日の発掘 残り {remaining} 回 / タップで詳細・上で今すぐ見る</p>
+                  ) : (
+                    <p className="text-slate-400 text-xs mt-1">タップで詳細 / 上スワイプで今すぐ見る</p>
+                  )}
                 </div>
+
+                {/* 上限前のソフトな訴求（壁にする前に余裕をもって案内） */}
+                {!isPremium && remaining !== null && remaining > 0 && remaining <= 5 && (
+                  <div className="w-full max-w-sm mb-3">
+                    <button
+                      onClick={async () => {
+                        if (!userId) return;
+                        const res = await fetch('/api/create-checkout-session', {
+                          method: 'POST', headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ user_id: userId }),
+                        }).catch(() => null);
+                        const data = res && res.ok ? await res.json().catch(() => ({})) : {};
+                        if (data?.url) { window.location.href = data.url; return; }
+                        fetch('/api/upgrade-premium', {
+                          method: 'POST', headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ user_id: userId }),
+                        }).then((r) => { if (r.ok) { setIsPremium(true); setRemaining(null); } }).catch(() => {});
+                      }}
+                      className="w-full py-2.5 bg-amber-500/15 border border-amber-500/30 text-amber-200 rounded-2xl text-xs font-bold active:scale-95 transition-transform"
+                    >
+                      あと {remaining} 回で今日の発掘は終了。プレミアムなら無制限で掘り続けられます →
+                    </button>
+                  </div>
+                )}
 
                 <div className="relative w-full max-w-sm" style={{ height: 'min(640px, calc(100dvh - 180px))' }}>
                   {/* 3枚目は影だけ表示して「まだある」感を出す */}
