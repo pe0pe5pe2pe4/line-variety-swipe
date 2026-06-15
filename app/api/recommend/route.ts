@@ -201,14 +201,14 @@ async function fetchTVShows(
   swipedIds: string[],
   swipedTitles: Set<string>,
   profile: Profile,
-  count: number
+  count: number,
+  orFilter = 'content_type.eq.tv_show,content_type.is.null'
 ): Promise<Content[]> {
-  // content_type が tv_show または NULL（未移行データ）を対象
-  // youtube系は source が youtube_recommend / youtube_search / youtuber / comedian / tv_official
+  // content_type が tv_show または NULL（未移行データ）を対象（orFilter で切替可）
   let query = supabase
     .from('contents')
     .select('*')
-    .or('content_type.eq.tv_show,content_type.eq.tver,content_type.is.null')
+    .or(orFilter)
     .not('thumbnail_url', 'eq', 'no_image')
     .order('description', { ascending: false, nullsFirst: false })
     .limit(120);
@@ -480,34 +480,6 @@ function sameBucket(a: Content, b: Content): boolean {
   return !!ca && ca === cb;
 }
 
-/**
- * TV/Tver と YouTube を多様性を保ちつつ混在させる（バグ2・3）。
- * - YouTube は3枠に1回（index%3===2）、2連続にしない
- * - 同ジャンル・同チャンネルが連続しないよう並べ替える
- */
-function mixContent(tvShows: Content[], ytVideos: Content[]): Content[] {
-  if (ytVideos.length === 0) return diversify(tvShows);
-  if (tvShows.length === 0) return ytVideos; // youtube は capPerChannel 済み
-
-  const result: Content[] = [];
-  let ti = 0, yi = 0, i = 0;
-  while (ti < tvShows.length || yi < ytVideos.length) {
-    const prevIsYt = result[result.length - 1]?.content_type === 'youtube';
-    const wantYt = i % 3 === 2 && yi < ytVideos.length && !prevIsYt;
-    if (wantYt) {
-      result.push(ytVideos[yi++]);
-    } else if (ti < tvShows.length) {
-      result.push(tvShows[ti++]);
-    } else if (yi < ytVideos.length && !prevIsYt) {
-      result.push(ytVideos[yi++]);
-    } else {
-      break;
-    }
-    i++;
-  }
-  return diversify(result);
-}
-
 // 同ジャンル/同チャンネルの連続を、後ろの異なる要素と入れ替えて緩和する
 function diversify(list: Content[]): Content[] {
   const result = [...list];
@@ -528,6 +500,73 @@ function diversify(list: Content[]): Content[] {
     }
   }
   return result;
+}
+
+// ── 種別比率(tv_show40/youtube30/tver30)でラウンドロビン混在し、
+//    ジャンル/放送局の連続を抑えて TOTAL 件まで返す（TASK2）──
+function station(c: Content): string {
+  return (c.channel_name ?? '').trim();
+}
+
+function mixDiverse(tvShow: Content[], youtube: Content[], tver: Content[], total: number): Content[] {
+  const queues = [
+    { items: tvShow, weight: 4, idx: 0, used: 0 },
+    { items: youtube, weight: 3, idx: 0, used: 0 },
+    { items: tver, weight: 3, idx: 0, used: 0 },
+  ];
+  const avail = tvShow.length + youtube.length + tver.length;
+  const target = Math.min(total, avail);
+  const out: Content[] = [];
+  while (out.length < target) {
+    // 比率に対して最も不足している種別を選ぶ（残りがある中で）
+    let best = -1;
+    let bestDeficit = -Infinity;
+    for (let i = 0; i < queues.length; i++) {
+      const q = queues[i];
+      if (q.idx >= q.items.length) continue;
+      const want = (out.length + 1) * (q.weight / 10);
+      const deficit = want - q.used;
+      if (deficit > bestDeficit) { bestDeficit = deficit; best = i; }
+    }
+    if (best < 0) break;
+    out.push(queues[best].items[queues[best].idx++]);
+    queues[best].used++;
+  }
+  return diversifyRuns(diversify(out));
+}
+
+// 同ジャンル4連続・同放送局3連続を後方の異なる要素と入れ替えて崩す
+function diversifyRuns(list: Content[]): Content[] {
+  const r = [...list];
+  const swapLater = (i: number, ok: (c: Content) => boolean) => {
+    for (let m = i + 1; m < r.length; m++) {
+      if (ok(r[m])) { [r[i], r[m]] = [r[m], r[i]]; return; }
+    }
+  };
+  for (let i = 0; i < r.length; i++) {
+    // ジャンル4連続 → i 番目を別ジャンルに
+    if (i >= 3 &&
+        resolveGenre(r[i]) === resolveGenre(r[i - 1]) &&
+        resolveGenre(r[i - 1]) === resolveGenre(r[i - 2]) &&
+        resolveGenre(r[i - 2]) === resolveGenre(r[i - 3])) {
+      swapLater(i, (c) => resolveGenre(c) !== resolveGenre(r[i - 1]));
+    }
+    // 放送局3連続 → i 番目を別放送局に
+    if (i >= 2 && station(r[i]) && station(r[i]) === station(r[i - 1]) && station(r[i - 1]) === station(r[i - 2])) {
+      swapLater(i, (c) => station(c) !== station(r[i - 1]));
+    }
+  }
+  return r;
+}
+
+// 多様性スコア(0-100)：隣接ペアでジャンルが異なる割合
+function computeDiversityScore(list: Content[]): number {
+  if (list.length < 2) return 100;
+  let diff = 0;
+  for (let i = 1; i < list.length; i++) {
+    if (resolveGenre(list[i]) !== resolveGenre(list[i - 1])) diff++;
+  }
+  return Math.round((diff / (list.length - 1)) * 100);
 }
 
 // ───────────────────────────────────────────────
@@ -669,46 +708,33 @@ export async function GET(request: Request) {
     profile.premium = false;
   }
 
-  // ── STEP 3: 混在比率を決定（2段階パーソナライズ）──
-  let tvRatio: number;
-  if (rightSwipeCount < 10) {
-    tvRatio = 0.7; // 0-9件: tv 70% / youtube 30%（固定コンテンツ・API不使用）
-  } else if (rightSwipeCount < 30) {
-    tvRatio = 0.5; // 10-29件: tv 50% / youtube 50%（動的キーワード検索）
-  } else {
-    tvRatio = 0.3; // 30+件: tv 30% / youtube 70%（フル最適化）
-  }
-
-  // 1コールあたりの返却数を増やし、20回で止まる問題を解消（残り少で追加取得＝無限スワイプ）
+  // ── STEP 3: 種別比率 tv_show 40% / youtube 30% / tver 30%（TASK2）──
   const TOTAL = 30;
-  const tvCount = Math.round(TOTAL * tvRatio);
-  const ytCount = TOTAL - tvCount;
+  const tvShowCount = Math.round(TOTAL * 0.4);
+  const ytCount = Math.round(TOTAL * 0.3);
+  const tverCount = TOTAL - tvShowCount - ytCount;
 
-  // ── STEP 4: 全ソースから並列取得 ──
-  // 0-9スワイプ：DBのキャッシュ済みYouTube（API呼び出しなし）
-  // 10+スワイプ：リアルタイムYouTube API検索
-  const [tvShows, ytVideos] = await timed(
+  // ── STEP 4: 種別ごとに並列取得（多めに取って補完できるように）──
+  const [tvShows, tverShows, ytVideos] = await timed(
     'recommend.fetchContents',
     Promise.all([
-      fetchTVShows(swipedIds, swipedTitles, profile, tvCount + ytCount),
+      fetchTVShows(swipedIds, swipedTitles, profile, TOTAL, 'content_type.eq.tv_show,content_type.is.null'),
+      fetchTVShows(swipedIds, swipedTitles, profile, TOTAL, 'content_type.eq.tver'),
       rightSwipeCount < 10
-        ? fetchStoredYouTubeVideos(swipedIds, swipedTitles, ytCount)
-        : fetchYouTubeVideos(keywords, swipedIds, swipedTitles, ytCount),
+        ? fetchStoredYouTubeVideos(swipedIds, swipedTitles, ytCount + 5)
+        : fetchYouTubeVideos(keywords, swipedIds, swipedTitles, ytCount + 5),
     ])
   );
 
-  // YouTube が足りない場合は TV で補完
-  const actualYtCount = ytVideos.length;
-  const finalTvCount = tvCount + (ytCount - actualYtCount);
-  const finalTvShows = tvShows.slice(0, finalTvCount);
-
-  // ── STEP 5: 混在・ジャンル/推薦理由を付与して返却 ──
-  const mixed = mixContent(finalTvShows, ytVideos);
+  // ── STEP 5: 種別比率(40/30/30)＋ジャンル/放送局の連続を抑えて混在し TOTAL 件まで ──
+  void tvShowCount; void tverCount; // 比率は mixDiverse の重みで表現
+  const mixed = mixDiverse(tvShows, ytVideos, tverShows, TOTAL);
   const result = mixed.map((c) => ({
     ...c,
     genre: resolveGenre(c),
     recommend_reason: reasonFor(c, profile),
   }));
+  const diversityScore = computeDiversityScore(result);
 
   // まだスワイプしていない番組の総数（概算）
   const { count: totalContents } = await supabase
@@ -719,13 +745,15 @@ export async function GET(request: Request) {
   // パーソナライズ度合い（0-100）：右スワイプ数に応じて上昇
   const personalizationScore = Math.min(100, Math.round((rightSwipeCount / 20) * 100));
 
+  const typeCount = (t: string) => result.filter((c) => (c.content_type ?? 'tv_show') === t).length;
   const headers: Record<string, string> = {
-    'X-Mix-Ratio': `tv=${finalTvShows.length}/yt=${actualYtCount}`,
+    'X-Mix-Ratio': `tv=${typeCount('tv_show')}/yt=${typeCount('youtube')}/tver=${typeCount('tver')}`,
     'X-Right-Swipes': String(rightSwipeCount),
     'X-Top-Genre': profile.topGenre ?? '',
     'X-Keywords': keywords.slice(0, 5).join(','),
     'X-Total-Available': String(totalAvailable),
     'X-Personalization-Score': String(personalizationScore),
+    'X-Diversity-Score': String(diversityScore),
     'Cache-Control': 'private, max-age=30',
   };
   cacheSet(cacheKey, result, headers);
