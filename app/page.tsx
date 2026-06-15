@@ -177,6 +177,16 @@ export default function Home() {
     setOnboardingDone(done);
   }, []);
 
+  // Stripe Checkout からの復帰（?upgraded=true）→ プレミアム反映してURLを掃除
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (new URLSearchParams(window.location.search).get('upgraded') === 'true') {
+      setIsPremium(true);
+      setSwipeLimitReached(false);
+      window.history.replaceState(null, '', window.location.pathname);
+    }
+  }, []);
+
   // フリーミアム状態の取得（課金状態・本日のスワイプ上限）
   useEffect(() => {
     if (!userId) return;
@@ -438,10 +448,20 @@ export default function Home() {
                         無料プランは {FREE_WATCHLATER_LIMIT} 件まで表示。残り {watchLater.length - FREE_WATCHLATER_LIMIT} 件はプレミアムで解放
                       </p>
                       <button
-                        onClick={() => userId && fetch('/api/upgrade-premium', {
-                          method: 'POST', headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ user_id: userId }),
-                        }).then((r) => { if (r.ok) setIsPremium(true); }).catch(() => {})}
+                        onClick={async () => {
+                          if (!userId) return;
+                          const res = await fetch('/api/create-checkout-session', {
+                            method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ user_id: userId }),
+                          }).catch(() => null);
+                          const data = res && res.ok ? await res.json().catch(() => ({})) : {};
+                          if (data?.url) { window.location.href = data.url; return; }
+                          // フォールバック（Stripe未設定）
+                          fetch('/api/upgrade-premium', {
+                            method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ user_id: userId }),
+                          }).then((r) => { if (r.ok) setIsPremium(true); }).catch(() => {});
+                        }}
                         className="mt-2 px-4 py-1.5 bg-amber-400 text-black rounded-full text-xs font-bold active:scale-95 transition-transform"
                       >
                         プレミアムにアップグレード

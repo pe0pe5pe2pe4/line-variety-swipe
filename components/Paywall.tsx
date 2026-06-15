@@ -16,12 +16,24 @@ export default function Paywall({ userId, onUpgraded, title = '今日のスワ�
     if (!userId) return;
     setLoading(true);
     try {
-      const res = await fetch('/api/upgrade-premium', {
+      // Stripe Checkout へ
+      const res = await fetch('/api/create-checkout-session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: userId }),
       });
-      if (res.ok) onUpgraded();
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.url) {
+        window.location.href = data.url;
+        return;
+      }
+      // Stripe 未設定時はモックでプレミアム付与にフォールバック
+      const mock = await fetch('/api/upgrade-premium', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: userId }),
+      });
+      if (mock.ok) onUpgraded();
     } catch {
       // 失敗時は何もしない
     } finally {
