@@ -53,7 +53,7 @@ export async function fetchTMDBLastEpisode(tmdbId: number): Promise<{
   }
 }
 
-export async function searchTMDBShow(title: string): Promise<{
+export async function searchTMDBShow(title: string, language = 'ja-JP'): Promise<{
   tmdb_id: number | null;
   thumbnail_url: string;
   description: string;
@@ -63,7 +63,7 @@ export async function searchTMDBShow(title: string): Promise<{
   if (!key) return empty;
 
   try {
-    const { url, headers } = buildTMDBRequest('/search/tv', { query: title, language: 'ja-JP' });
+    const { url, headers } = buildTMDBRequest('/search/tv', { query: title, language });
     const res = await fetch(url, { headers });
     if (!res.ok) return empty;
     const data = await res.json();
