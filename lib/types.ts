@@ -26,6 +26,8 @@ export type Content = {
   // コンテンツ品質スコア（0-1）
   quality_score?: number | null;
   created_at?: string | null;
+  // 発掘枠（露出の少ない＝まだ知られていない候補）か
+  discovery?: boolean;
 };
 
 const PLACEHOLDER_IMG = 'https://placehold.co/400x600/1a1a2e/ffffff?text=No+Image';

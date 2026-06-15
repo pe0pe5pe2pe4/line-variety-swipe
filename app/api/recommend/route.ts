@@ -430,6 +430,22 @@ function capPerChannel(list: Content[], n: number): Content[] {
   return out;
 }
 
+// 候補集合の「露出量」（全ユーザーのスワイプ回数）を取得する。
+// 露出が少ない＝まだ知られていない＝発掘候補。候補IDに絞った軽量クエリ。
+async function candidateExposure(ids: string[]): Promise<Map<string, number>> {
+  const m = new Map<string, number>();
+  if (ids.length === 0) return m;
+  try {
+    const { data } = await supabase.from('swipes').select('content_id').in('content_id', ids);
+    for (const r of (data ?? []) as { content_id: string }[]) {
+      m.set(r.content_id, (m.get(r.content_id) ?? 0) + 1);
+    }
+  } catch {
+    // 失敗時は空（全件0=発掘優先度フラットでも動作する）
+  }
+  return m;
+}
+
 // ───────────────────────────────────────────────
 // ユーティリティ
 // ───────────────────────────────────────────────
@@ -715,27 +731,57 @@ export async function GET(request: Request) {
   const ytCount = Math.round(TOTAL * 0.3);
   const tverCount = TOTAL - tvShowCount - ytCount;
 
-  // ── STEP 4: 種別ごとに並列取得（多めに取って補完できるように）──
+  // ── STEP 4: 種別ごとに並列取得（発掘枠用に多めの候補プールを確保）──
+  const POOL = TOTAL + 25; // 上位だけでなく裾野(=埋もれた候補)も取り込む
   const [tvShows, tverShows, ytVideos] = await timed(
     'recommend.fetchContents',
     Promise.all([
-      fetchTVShows(swipedIds, swipedTitles, profile, TOTAL, 'content_type.eq.tv_show,content_type.is.null'),
-      fetchTVShows(swipedIds, swipedTitles, profile, TOTAL, 'content_type.eq.tver'),
+      fetchTVShows(swipedIds, swipedTitles, profile, POOL, 'content_type.eq.tv_show,content_type.is.null'),
+      fetchTVShows(swipedIds, swipedTitles, profile, POOL, 'content_type.eq.tver'),
       rightSwipeCount < 10
-        ? fetchStoredYouTubeVideos(swipedIds, swipedTitles, ytCount + 5)
-        : fetchYouTubeVideos(keywords, swipedIds, swipedTitles, ytCount + 5),
+        ? fetchStoredYouTubeVideos(swipedIds, swipedTitles, ytCount + 15)
+        : fetchYouTubeVideos(keywords, swipedIds, swipedTitles, ytCount + 15),
     ])
   );
 
-  // ── STEP 5: 種別比率(40/30/30)＋ジャンル/放送局の連続を抑えて混在し TOTAL 件まで ──
+  // ── STEP 5: 「あなた向け」70% ＋「発掘枠」30% を混ぜて返す ──
   void tvShowCount; void tverCount; // 比率は mixDiverse の重みで表現
-  const mixed = mixDiverse(tvShows, ytVideos, tverShows, TOTAL);
-  const result = mixed.map((c) => ({
+  const gemCount = Math.round(TOTAL * 0.3);
+  const mainCount = TOTAL - gemCount;
+
+  // あなた向け（嗜好順）
+  const forYou = mixDiverse(tvShows, ytVideos, tverShows, mainCount);
+
+  // 発掘枠：候補プールから「露出が少ない＝まだ知られていない」ものを優先。
+  // 既出を避け、可能なら自分のトップジャンル以外（フィルターバブルを破る）。
+  const candAll = [...tvShows, ...tverShows, ...ytVideos];
+  const exposure = await candidateExposure(candAll.map((c) => c.id));
+  const usedIds = new Set(forYou.map((c) => c.id));
+  const offGenrePool = candAll
+    .filter((c) => !usedIds.has(c.id) && (!profile.topGenre || resolveGenre(c) !== profile.topGenre));
+  const gemPool = (offGenrePool.length >= gemCount ? offGenrePool : candAll.filter((c) => !usedIds.has(c.id)))
+    .sort((a, b) => (exposure.get(a.id) ?? 0) - (exposure.get(b.id) ?? 0));
+  const gems = capPerChannel(gemPool, 2).slice(0, gemCount);
+  const gemIds = new Set(gems.map((c) => c.id));
+
+  // 発掘枠を3枠に1回の頻度で差し込み、ジャンル/放送局の連続を抑える
+  const woven: Content[] = [];
+  let mi = 0;
+  let gi = 0;
+  for (let i = 0; woven.length < TOTAL && (mi < forYou.length || gi < gems.length); i++) {
+    if (i % 3 === 2 && gi < gems.length) woven.push(gems[gi++]);
+    else if (mi < forYou.length) woven.push(forYou[mi++]);
+    else if (gi < gems.length) woven.push(gems[gi++]);
+  }
+  const ordered = diversify(woven);
+  const result = ordered.map((c) => ({
     ...c,
     genre: resolveGenre(c),
-    recommend_reason: reasonFor(c, profile),
+    discovery: gemIds.has(c.id),
+    recommend_reason: gemIds.has(c.id) ? '🔍 まだ知られていない発掘枠' : reasonFor(c, profile),
   }));
   const diversityScore = computeDiversityScore(result);
+  const discoveryCount = result.filter((c) => c.discovery).length;
 
   // まだスワイプしていない番組の総数（概算）
   const { count: totalContents } = await supabase
@@ -755,6 +801,7 @@ export async function GET(request: Request) {
     'X-Total-Available': String(totalAvailable),
     'X-Personalization-Score': String(personalizationScore),
     'X-Diversity-Score': String(diversityScore),
+    'X-Discovery-Count': String(discoveryCount),
     'Cache-Control': 'private, max-age=30',
   };
   cacheSet(cacheKey, result, headers);

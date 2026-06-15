@@ -132,18 +132,26 @@ export default function SwipeCard({ content, onSwipe, onShowDetail, isTop, featu
         {/* 上下グラデーションオーバーレイ */}
         <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/10 to-black/40 pointer-events-none" />
 
-        {/* 推薦理由（あれば左上に小さく表示） */}
-        {(featured || content.recommend_reason) && (
+        {/* バッジ（左上） */}
+        {(featured || content.discovery || content.recommend_reason) && (
           <div className="absolute top-4 left-4 right-4 flex flex-wrap gap-2 pointer-events-none">
-            {featured && (
-              <span className="inline-block bg-amber-400 text-black text-xs font-black px-3 py-1 rounded-full shadow">
-                ⭐ あなたへのおすすめ
+            {content.discovery ? (
+              <span className="inline-block bg-fuchsia-500 text-white text-xs font-black px-3 py-1 rounded-full shadow">
+                🔍 発掘 — まだ知られてない
               </span>
-            )}
-            {content.recommend_reason && (
-              <span className="inline-block bg-indigo-500/85 text-white text-xs font-bold px-3 py-1 rounded-full backdrop-blur-sm">
-                💡 {content.recommend_reason}
-              </span>
+            ) : (
+              <>
+                {featured && (
+                  <span className="inline-block bg-amber-400 text-black text-xs font-black px-3 py-1 rounded-full shadow">
+                    ⭐ あなたへのおすすめ
+                  </span>
+                )}
+                {content.recommend_reason && (
+                  <span className="inline-block bg-indigo-500/85 text-white text-xs font-bold px-3 py-1 rounded-full backdrop-blur-sm">
+                    💡 {content.recommend_reason}
+                  </span>
+                )}
+              </>
             )}
           </div>
         )}
