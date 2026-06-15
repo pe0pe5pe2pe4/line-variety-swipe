@@ -13,11 +13,13 @@ type Props = {
   onShowDetail: () => void;
   isTop: boolean;
   featured?: boolean;
+  // A/Bテスト: 'B' は「今すぐ見る」ボタンを常時大きく表示
+  variant?: 'A' | 'B';
 };
 
 const SWIPE_THRESHOLD = 100;
 
-export default function SwipeCard({ content, onSwipe, onShowDetail, isTop, featured }: Props) {
+export default function SwipeCard({ content, onSwipe, onShowDetail, isTop, featured, variant = 'A' }: Props) {
   const [{ x, y, rotate, opacity }, api] = useSpring(() => ({
     x: 0,
     y: 0,
@@ -215,6 +217,16 @@ export default function SwipeCard({ content, onSwipe, onShowDetail, isTop, featu
           {getDisplayDescription(content) ? (
             <p className="text-slate-300 text-sm line-clamp-2">{getDisplayDescription(content)}</p>
           ) : null}
+
+          {/* A/Bテスト B群：常時表示の「今すぐ見る」ボタン */}
+          {variant === 'B' && (
+            <button
+              onPointerDown={(e) => { e.stopPropagation(); commit('up'); }}
+              className="mt-1 w-full py-3 bg-sky-500 text-white rounded-full font-black text-base shadow-lg active:scale-95 transition-transform"
+            >
+              ▶ 今すぐ見る
+            </button>
+          )}
 
           {/* Action buttons */}
           <div className="flex justify-center items-center gap-6 pt-2">

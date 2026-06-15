@@ -16,10 +16,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'line_user_id required' }, { status: 400 });
   }
 
-  // 既存ユーザーを確認（referral_code が無ければ採番）
+  // 既存ユーザーを確認（referral_code / ab_group が無ければ採番）
   const { data: existing } = await supabase
     .from('users')
-    .select('id, referral_code, referred_by')
+    .select('id, referral_code, referred_by, ab_group')
     .eq('line_user_id', line_user_id)
     .maybeSingle();
 
@@ -28,6 +28,8 @@ export async function POST(request: Request) {
   const newReferredBy =
     existing?.referred_by ??
     (referred_by && referred_by !== referralCode ? referred_by : null);
+  // A/Bテスト群を初回登録時にランダム割り当て
+  const abGroup = existing?.ab_group ?? (Math.random() < 0.5 ? 'A' : 'B');
 
   const { data, error } = await supabase
     .from('users')
@@ -38,6 +40,7 @@ export async function POST(request: Request) {
         picture_url,
         referral_code: referralCode,
         referred_by: newReferredBy,
+        ab_group: abGroup,
         updated_at: new Date().toISOString(),
       },
       { onConflict: 'line_user_id' }

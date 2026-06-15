@@ -67,6 +67,8 @@ export default function Home() {
   // フリーミアム状態
   const [isPremium, setIsPremium] = useState(false);
   const [swipeLimitReached, setSwipeLimitReached] = useState(false);
+  // A/Bテスト群
+  const [abGroup, setAbGroup] = useState<'A' | 'B'>('A');
 
   // 無限スワイプ用：これまで表示したIDを記録し、追加取得時に除外する
   const seenSet = useRef<Set<string>>(new Set());
@@ -184,6 +186,7 @@ export default function Home() {
         if (!d || d.error) return;
         setIsPremium(!!d.isPremium);
         setSwipeLimitReached(!!d.limitReached);
+        if (d.abGroup === 'B') setAbGroup('B');
       })
       .catch(() => {});
   }, [userId]);
@@ -392,6 +395,7 @@ export default function Home() {
                           onShowDetail={() => handleShowDetail(content)}
                           isTop={isTop}
                           featured={isTop && !hasSwipedOnce}
+                          variant={abGroup}
                         />
                       </div>
                     );
