@@ -130,15 +130,28 @@ function scoreWithProfile(c: Content, p: Profile): number {
   return score;
 }
 
-// 新しいコンテンツを優遇し、古いコンテンツの頻度を下げる
+// 新しいコンテンツを優遇し、古いコンテンツの頻度を下げる（最新重視を強化）
 function freshnessBonus(createdAt?: string): number {
   if (!createdAt) return 0;
   const t = new Date(createdAt).getTime();
   if (Number.isNaN(t)) return 0;
   const days = (Date.now() - t) / (24 * 60 * 60 * 1000);
-  if (days <= 7) return 2;
-  if (days >= 30) return -1;
+  if (days <= 3) return 4;
+  if (days <= 7) return 3;
+  if (days <= 30) return 1;
+  if (days >= 60) return -1.5;
   return 0;
+}
+
+// 新着順に並んだ list を、前方(新しい)を優先しつつ毎回少し変える。
+// コールドスタートでも「できるだけ最新かつ可変」な初回フィードにする。
+function freshShuffle(list: Content[], count: number): Content[] {
+  const n = Math.max(list.length, 1);
+  return list
+    .map((c, i) => ({ c, key: i * 0.7 + Math.random() * n * 0.5 }))
+    .sort((a, b) => a.key - b.key)
+    .slice(0, count)
+    .map((x) => x.c);
 }
 
 // 時間帯別に優先するジャンル（JST基準）
@@ -206,13 +219,14 @@ async function fetchTVShows(
   orFilter = 'content_type.eq.tv_show,content_type.is.null'
 ): Promise<Content[]> {
   // content_type が tv_show または NULL（未移行データ）を対象（orFilter で切替可）
+  // できるだけ最新を出すため新着(created_at)順で候補を取得する。
   let query = supabase
     .from('contents')
     .select('*')
     .or(orFilter)
     .not('thumbnail_url', 'eq', 'no_image')
-    .order('description', { ascending: false, nullsFirst: false })
-    .limit(120);
+    .order('created_at', { ascending: false, nullsFirst: false })
+    .limit(150);
 
   if (swipedIds.length > 0) {
     query = query.not('id', 'in', `(${swipedIds.join(',')})`);
@@ -224,8 +238,8 @@ async function fetchTVShows(
   if (list.length === 0) return [];
 
   if (!hasPreference(profile)) {
-    // スワイプ履歴なし → ランダム
-    return shuffle(list).slice(0, count);
+    // 履歴なし(コールドスタート) → 最新優先＋ランダムで毎回少し変わる初回フィード
+    return freshShuffle(list, count);
   }
 
   // スコアリング + 重み付きシャッフル（ジャンル3/放送局2/キーワード1・嫌いジャンル減点）
@@ -397,12 +411,14 @@ async function fetchStoredYouTubeVideos(
   swipedTitles: Set<string>,
   count: number
 ): Promise<Content[]> {
+  // 新着順で取得し、最新を優先（できるだけ最新の動画を初回に出す）
   let query = supabase
     .from('contents')
     .select('*')
     .eq('content_type', 'youtube')
     .not('thumbnail_url', 'eq', 'no_image')
-    .limit(count * 5);
+    .order('created_at', { ascending: false, nullsFirst: false })
+    .limit(count * 8);
 
   if (swipedIds.length > 0) {
     query = query.not('id', 'in', `(${swipedIds.join(',')})`);
@@ -410,8 +426,8 @@ async function fetchStoredYouTubeVideos(
 
   const { data } = await query;
   const list = dedupeByTitle((data ?? []) as Content[], swipedTitles);
-  // 同一チャンネルは1セッション最大3件まで（バグ3）
-  return capPerChannel(shuffle(list), 3).slice(0, count);
+  // 同一チャンネルは最大3件＋最新優先のフレッシュシャッフル
+  return capPerChannel(freshShuffle(list, list.length), 3).slice(0, count);
 }
 
 // 同一 channel_name のコンテンツを最大 n 件に制限する
@@ -752,15 +768,25 @@ export async function GET(request: Request) {
   // あなた向け（嗜好順）
   const forYou = mixDiverse(tvShows, ytVideos, tverShows, mainCount);
 
-  // 発掘枠：候補プールから「露出が少ない＝まだ知られていない」ものを優先。
-  // 既出を避け、可能なら自分のトップジャンル以外（フィルターバブルを破る）。
+  // 発掘枠：「露出が少ない＝まだ知られていない」候補を優先しつつ、
+  // 当たり学習＝過去に好きだったチャンネル(無名含む)の別動画を最優先に引き上げる。
   const candAll = [...tvShows, ...tverShows, ...ytVideos];
   const exposure = await candidateExposure(candAll.map((c) => c.id));
   const usedIds = new Set(forYou.map((c) => c.id));
-  const offGenrePool = candAll
-    .filter((c) => !usedIds.has(c.id) && (!profile.topGenre || resolveGenre(c) !== profile.topGenre));
-  const gemPool = (offGenrePool.length >= gemCount ? offGenrePool : candAll.filter((c) => !usedIds.has(c.id)))
-    .sort((a, b) => (exposure.get(a.id) ?? 0) - (exposure.get(b.id) ?? 0));
+  const likedChannels = new Set(Object.keys(profile.stationWeights));
+  const gemRank = (c: Content): number => {
+    const ch = (c.channel_name ?? '').trim();
+    if (ch && likedChannels.has(ch)) return 0; // 好きなチャンネルの別動画（当たり学習）
+    if (!profile.topGenre || resolveGenre(c) !== profile.topGenre) return 1; // 別ジャンルのセレンディピティ
+    return 2;
+  };
+  const gemPool = candAll
+    .filter((c) => !usedIds.has(c.id))
+    .sort((a, b) => {
+      const r = gemRank(a) - gemRank(b);
+      if (r !== 0) return r;
+      return (exposure.get(a.id) ?? 0) - (exposure.get(b.id) ?? 0); // 露出が少ない＝未発掘を優先
+    });
   const gems = capPerChannel(gemPool, 2).slice(0, gemCount);
   const gemIds = new Set(gems.map((c) => c.id));
 
