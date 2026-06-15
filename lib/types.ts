@@ -9,6 +9,8 @@ export type Content = {
   content_type?: ContentType;
   youtube_url?: string;
   tver_url?: string;
+  // Tver/番組カード用に検索で見つけた公式YouTube動画（無ければ画像にフォールバック）
+  preview_youtube_url?: string | null;
   channel_name?: string;
   episode_number?: string;
   episode_title?: string;

@@ -92,8 +92,9 @@ export default function SwipeCard({ content, onSwipe, onShowDetail, isTop, featu
 
   const isYoutube = content.content_type === 'youtube';
   const isTver = content.content_type === 'tver';
-  // 先頭カードかつ YouTube ならインライン動画プレビュー（ミュート自動再生）
-  const ytId = isYoutube ? extractYouTubeId(content.youtube_url) : null;
+  // 先頭カードはインライン動画プレビュー（ミュート自動再生）。
+  // YouTube は本編、Tver/番組は検索で見つけた公式クリップ（'none'は画像のまま）。
+  const ytId = extractYouTubeId(content.youtube_url) ?? extractYouTubeId(content.preview_youtube_url);
   const showVideo = isTop && !!ytId;
   const genre = content.genre ?? inferGenre(content);
   const station = content.channel_name?.trim();
