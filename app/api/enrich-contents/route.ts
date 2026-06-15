@@ -67,14 +67,16 @@ export async function GET(request: Request) {
 
   let updated = 0;
   const updateErrors: string[] = [];
-  for (const { id, enriched } of results) {
-    const { error: upErr } = await supabase
-      .from('contents')
-      .update({ enriched_description: enriched })
-      .eq('id', id);
-    if (!upErr) updated++;
-    else if (updateErrors.length < 5) updateErrors.push(`${id}: ${upErr.message}`);
-  }
+  await Promise.all(
+    results.map(async ({ id, enriched }) => {
+      const { error: upErr } = await supabase
+        .from('contents')
+        .update({ enriched_description: enriched })
+        .eq('id', id);
+      if (!upErr) updated++;
+      else if (updateErrors.length < 5) updateErrors.push(`${id}: ${upErr.message}`);
+    })
+  );
 
   console.log('[enrich-contents] done', { processed: rows.length, updated, claudeErrors: errors.length, updateErrors: updateErrors.length });
 

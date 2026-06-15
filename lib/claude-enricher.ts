@@ -38,11 +38,16 @@ export async function enrichOne(input: EnrichInput): Promise<string | null> {
   const client = getClient();
   if (!client) throw new Error('ANTHROPIC_API_KEY not set');
 
-  const response = await client.messages.create({
-    model: 'claude-opus-4-8',
-    max_tokens: 256,
-    messages: [{ role: 'user', content: buildPrompt(input) }],
-  });
+  // 短い紹介文の生成なので高速・低コストの Haiku を使用（Opusだと20件で
+  // タイムアウトするため）。1呼び出し15秒でタイムアウト。
+  const response = await client.messages.create(
+    {
+      model: 'claude-haiku-4-5',
+      max_tokens: 256,
+      messages: [{ role: 'user', content: buildPrompt(input) }],
+    },
+    { timeout: 15000 }
+  );
 
   // 安全分類によるリフューザル（Opus系では稀だが念のため）
   if (response.stop_reason === 'refusal') {
@@ -68,22 +73,31 @@ export type EnrichResult = {
   errors: { id: string; error: string }[];
 };
 
-/** 複数件を順次加工（レート制御のため直列）。エラーは収集して返す。 */
+const CONCURRENCY = 5;
+
+/** 複数件を並列(最大5)で加工。タイムアウト回避のため直列にしない。エラーは収集して返す。 */
 export async function enrichBatch(inputs: (EnrichInput & { id: string })[]): Promise<EnrichResult> {
   const results: { id: string; enriched: string }[] = [];
   const errors: { id: string; error: string }[] = [];
-  for (const input of inputs) {
-    try {
-      const enriched = await enrichOne(input);
-      if (enriched) results.push({ id: input.id, enriched });
-      else errors.push({ id: input.id, error: 'empty response' });
-    } catch (e) {
-      // Anthropic SDK のエラーは status/message を持つ
-      const err = e as { status?: number; message?: string };
-      const msg = err.status ? `${err.status}: ${err.message ?? ''}` : err.message ?? String(e);
-      console.error('[enrich] failed for', input.id, msg);
-      errors.push({ id: input.id, error: msg });
+  let cursor = 0;
+
+  async function worker() {
+    while (cursor < inputs.length) {
+      const input = inputs[cursor++];
+      try {
+        const enriched = await enrichOne(input);
+        if (enriched) results.push({ id: input.id, enriched });
+        else errors.push({ id: input.id, error: 'empty response' });
+      } catch (e) {
+        const err = e as { status?: number; message?: string };
+        const msg = err.status ? `${err.status}: ${err.message ?? ''}` : err.message ?? String(e);
+        console.error('[enrich] failed for', input.id, msg);
+        errors.push({ id: input.id, error: msg });
+      }
     }
   }
+
+  const workers = Array.from({ length: Math.min(CONCURRENCY, inputs.length) }, () => worker());
+  await Promise.all(workers);
   return { results, errors };
 }
