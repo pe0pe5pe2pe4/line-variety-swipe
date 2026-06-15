@@ -1,5 +1,6 @@
 'use client';
 import ContentImage from './ContentImage';
+import FontSizeSetting from './FontSizeSetting';
 
 export type TopProgram = {
   id: string;
@@ -198,6 +199,9 @@ export default function MyPage({ stats, referral, loading }: Props) {
           </div>
         </div>
       )}
+
+      {/* 設定：文字サイズ */}
+      <FontSizeSetting />
 
       {/* ジャンル・放送局ランキング */}
       <RankingList title="好きなジャンル" emoji="🎭" items={stats.genreRanking} />

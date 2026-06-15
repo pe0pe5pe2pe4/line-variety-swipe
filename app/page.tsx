@@ -438,6 +438,33 @@ export default function Home() {
 
   const handleShowDetail = (content: Content) => setModalContent(content);
 
+  // キーボード操作（→右スワイプ / ←左スワイプ / ↑上スワイプ）
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (activeTab !== 'swipe') return;
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      const top = contents[0];
+      if (!top) return;
+      if (e.key === 'ArrowRight') { e.preventDefault(); handleSwipe('right', top); }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); handleSwipe('left', top); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); handleSwipe('up', top); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, contents]);
+
+  // 保存済みフォントサイズ倍率を起動時に適用
+  useEffect(() => {
+    try {
+      const scale = localStorage.getItem('font_scale');
+      if (scale) document.documentElement.style.fontSize = scale;
+    } catch {
+      // 無視
+    }
+  }, []);
+
   // ── ローディング：userId または onboardingDone が未確定 ──
   if (userId === null || onboardingDone === null) {
     return (
@@ -624,32 +651,38 @@ export default function Home() {
       </main>
 
       {/* Bottom tab bar */}
-      <nav className="fixed bottom-0 left-0 right-0 h-16 bg-slate-900/95 backdrop-blur border-t border-slate-700 flex z-40 safe-bottom">
+      <nav className="fixed bottom-0 left-0 right-0 h-16 bg-slate-900/95 backdrop-blur border-t border-slate-700 flex z-40 safe-bottom" aria-label="メインナビゲーション">
         <button
           onClick={() => setActiveTab('swipe')}
+          aria-label="スワイプ"
+          aria-current={activeTab === 'swipe'}
           className={`flex-1 flex flex-col items-center justify-center gap-0.5 text-xs transition-colors ${
             activeTab === 'swipe' ? 'text-indigo-400' : 'text-slate-500'
           }`}
         >
-          <span className="text-xl">🃏</span>
+          <span className="text-xl" aria-hidden="true">🃏</span>
           <span>スワイプ</span>
         </button>
         <button
           onClick={() => setActiveTab('watchlater')}
+          aria-label="あとで見るリスト"
+          aria-current={activeTab === 'watchlater'}
           className={`flex-1 flex flex-col items-center justify-center gap-0.5 text-xs transition-colors ${
             activeTab === 'watchlater' ? 'text-indigo-400' : 'text-slate-500'
           }`}
         >
-          <span className="text-xl">📋</span>
+          <span className="text-xl" aria-hidden="true">📋</span>
           <span>あとで見る</span>
         </button>
         <button
           onClick={() => setActiveTab('mypage')}
+          aria-label="マイページ"
+          aria-current={activeTab === 'mypage'}
           className={`flex-1 flex flex-col items-center justify-center gap-0.5 text-xs transition-colors ${
             activeTab === 'mypage' ? 'text-indigo-400' : 'text-slate-500'
           }`}
         >
-          <span className="text-xl">📊</span>
+          <span className="text-xl" aria-hidden="true">📊</span>
           <span>マイページ</span>
         </button>
       </nav>

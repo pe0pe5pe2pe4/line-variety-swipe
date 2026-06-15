@@ -115,6 +115,9 @@ export default function SwipeCard({ content, onSwipe, onShowDetail, isTop, featu
       // 長押し：モバイルで contextmenu イベントが発火する
       onContextMenu={(e) => { e.preventDefault(); if (isTop && !gone.current) onShowDetail(); }}
       className="will-change-transform swipe-surface"
+      role="group"
+      aria-label={`番組カード: ${content.title}。左右上にスワイプ、または矢印キーで操作`}
+      aria-roledescription="スワイプカード"
     >
       {/* TikTok風 縦型フルスクリーンカード：画像全面 + 下部グラデにテキスト */}
       <div className="relative w-full h-full rounded-3xl shadow-2xl overflow-hidden bg-black">
@@ -222,6 +225,7 @@ export default function SwipeCard({ content, onSwipe, onShowDetail, isTop, featu
           {variant === 'B' && (
             <button
               onPointerDown={(e) => { e.stopPropagation(); commit('up'); }}
+              aria-label="今すぐ見る"
               className="mt-1 w-full py-3 bg-sky-500 text-white rounded-full font-black text-base shadow-lg active:scale-95 transition-transform"
             >
               ▶ 今すぐ見る
