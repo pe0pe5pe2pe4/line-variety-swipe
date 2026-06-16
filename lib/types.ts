@@ -30,6 +30,9 @@ export type Content = {
   created_at?: string | null;
   // YouTube実再生数（発掘のミドル帯=数万〜数十万 を選ぶのに使用）
   yt_view_count?: number | null;
+  // カードに出す“フック”表示（recommendが付与）
+  rank_badge?: string | null;   // 例「🔥 今週の急上昇 #3」「🥇 お笑い 視聴1位」
+  views_label?: string | null;  // 例「32万回再生」
   // 発掘枠（露出の少ない＝まだ知られていない候補）か
   discovery?: boolean;
 };

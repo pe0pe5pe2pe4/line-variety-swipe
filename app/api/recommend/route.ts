@@ -457,6 +457,65 @@ function capPerChannel(list: Content[], n: number): Content[] {
   return out;
 }
 
+// 再生回数を「32万回再生」形式に整形（フック表示用）
+function formatViews(v?: number | null): string | null {
+  if (typeof v !== 'number' || v <= 0) return null;
+  if (v >= 100_000_000) return `${Math.round(v / 10_000_000) / 10}億回再生`;
+  if (v >= 10_000) return `${Math.round(v / 10_000)}万回再生`;
+  return `${v.toLocaleString('en-US')}回再生`;
+}
+
+// 今週(過去7日)の右スワイプ数で急上昇ランキング（content_id → 順位）。
+async function trendingRanking(): Promise<Map<string, number>> {
+  const rank = new Map<string, number>();
+  try {
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const { data } = await supabase
+      .from('swipes')
+      .select('content_id')
+      .eq('direction', 'right')
+      .gte('created_at', weekAgo);
+    const counts = new Map<string, number>();
+    for (const s of (data ?? []) as { content_id: string }[]) {
+      counts.set(s.content_id, (counts.get(s.content_id) ?? 0) + 1);
+    }
+    [...counts.entries()]
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 20)
+      .forEach(([id], i) => rank.set(id, i + 1));
+  } catch {
+    // 失敗時は空
+  }
+  return rank;
+}
+
+// ジャンル別の YouTube 視聴回数ランキング（各ジャンルの上位3件・content_id → {genre,rank}）。
+async function genreViewRanking(): Promise<Map<string, { genre: string; rank: number }>> {
+  const out = new Map<string, { genre: string; rank: number }>();
+  try {
+    const { data } = await supabase
+      .from('contents')
+      .select('id, title, description, channel_name, content_type, genre, yt_view_count')
+      .eq('content_type', 'youtube')
+      .gt('yt_view_count', 0)
+      .order('yt_view_count', { ascending: false })
+      .limit(500);
+    const perGenre = new Map<string, string[]>();
+    for (const r of (data ?? []) as (Content & { id: string })[]) {
+      const g = resolveGenre(r);
+      const arr = perGenre.get(g) ?? [];
+      if (arr.length < 3) arr.push(r.id);
+      perGenre.set(g, arr);
+    }
+    for (const [genre, ids] of perGenre) {
+      ids.forEach((id, i) => out.set(id, { genre, rank: i + 1 }));
+    }
+  } catch {
+    // 失敗時は空
+  }
+  return out;
+}
+
 // 候補集合の「露出量」（全ユーザーのスワイプ回数）を取得する。
 // 露出が少ない＝まだ知られていない＝発掘候補。候補IDに絞った軽量クエリ。
 async function candidateExposure(ids: string[]): Promise<Map<string, number>> {
@@ -828,12 +887,30 @@ export async function GET(request: Request) {
     else if (gi < gems.length) woven.push(gems[gi++]);
   }
   const ordered = diversify(woven);
-  const result = ordered.map((c) => ({
-    ...c,
-    genre: resolveGenre(c),
-    discovery: gemIds.has(c.id),
-    recommend_reason: gemIds.has(c.id) ? '🔍 まだ知られていない発掘枠' : reasonFor(c, profile),
-  }));
+
+  // ── フック表示：再生回数・今週の急上昇ランキング・カテゴリ別視聴順位 ──
+  const [trendingRank, genreViewRank] = await Promise.all([
+    trendingRanking(),
+    genreViewRanking(),
+  ]);
+  const result = ordered.map((c) => {
+    const tr = trendingRank.get(c.id);
+    const gvr = genreViewRank.get(c.id);
+    let rankBadge: string | null = null;
+    if (tr) rankBadge = `🔥 今週の急上昇 #${tr}`;
+    else if (gvr) {
+      const medal = gvr.rank === 1 ? '🥇' : gvr.rank === 2 ? '🥈' : '🥉';
+      rankBadge = `${medal} ${gvr.genre} 視聴${gvr.rank}位`;
+    }
+    return {
+      ...c,
+      genre: resolveGenre(c),
+      discovery: gemIds.has(c.id),
+      recommend_reason: gemIds.has(c.id) ? '🔍 まだ知られていない発掘枠' : reasonFor(c, profile),
+      rank_badge: rankBadge,
+      views_label: formatViews(c.yt_view_count),
+    };
+  });
   const diversityScore = computeDiversityScore(result);
   const discoveryCount = result.filter((c) => c.discovery).length;
 

@@ -162,16 +162,21 @@ export default function SwipeCard({ content, onSwipe, onShowDetail, isTop, featu
           }`}
         />
 
-        {/* バッジ（左上） */}
-        {(featured || content.discovery || content.recommend_reason) && (
-          <div className="absolute top-4 left-4 right-4 flex flex-wrap gap-2 pointer-events-none">
+        {/* バッジ（左上）＝フック。ランキングを最優先で大きく見せる */}
+        {(content.rank_badge || featured || content.discovery || content.recommend_reason) && (
+          <div className="absolute top-4 left-4 right-14 flex flex-wrap gap-2 pointer-events-none">
+            {content.rank_badge && (
+              <span className="inline-block bg-gradient-to-r from-amber-400 to-orange-500 text-black text-sm font-black px-3 py-1 rounded-full shadow-lg">
+                {content.rank_badge}
+              </span>
+            )}
             {content.discovery ? (
               <span className="inline-block bg-fuchsia-500 text-white text-xs font-black px-3 py-1 rounded-full shadow">
                 🔍 発掘 — まだ知られてない
               </span>
             ) : (
               <>
-                {featured && (
+                {featured && !content.rank_badge && (
                   <span className="inline-block bg-amber-400 text-black text-xs font-black px-3 py-1 rounded-full shadow">
                     ⭐ あなたへのおすすめ
                   </span>
@@ -252,6 +257,11 @@ export default function SwipeCard({ content, onSwipe, onShowDetail, isTop, featu
                   📺 {station}
                 </span>
               )
+            )}
+            {content.views_label && (
+              <span className="text-xs font-black text-white bg-black/50 px-2.5 py-0.5 rounded-full backdrop-blur-sm">
+                ▶ {content.views_label}
+              </span>
             )}
           </div>
 
