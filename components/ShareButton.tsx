@@ -9,7 +9,7 @@ type Props = {
 /** 番組カードのシェアボタン。Web Share API → 無ければ LINE 共有にフォールバック */
 export default function ShareButton({ content, className }: Props) {
   const buildShareText = () => {
-    // 番組詳細ページ(/show/[id])を共有 → OGPに番組サムネイルが表示される
+    // 番組詳細ページ(/show/[id])を共有 → OGPに番組サムネイル・受け取った側はその場で動画再生
     const base =
       process.env.NEXT_PUBLIC_SITE_URL ||
       (typeof window !== 'undefined' ? window.location.origin : '');
@@ -17,7 +17,13 @@ export default function ShareButton({ content, className }: Props) {
     // アフィリエイトリンクがあればシェアテキストにも含める（収益最大化）
     const affiliate = content.vod_affiliate_url?.trim();
     const affiliateLine = affiliate ? `\n▶ 視聴はこちら: ${affiliate}` : '';
-    return `「${content.title}」が気になってる🎬\nバラ推しで発見したよ！\nあなたのおすすめは？${affiliateLine}\n${url}`;
+    // シェアの主役は「アプリ」ではなく「この1本」— 発掘フックがあれば数字で語る
+    const hook = content.rank_badge
+      ? `${content.rank_badge}\n`
+      : content.discovery
+        ? 'まだ知られてないけど面白いやつ見つけた💎\n'
+        : '';
+    return `「${content.title}」\n${hook}これ観て🎬${affiliateLine}\n${url}`;
   };
 
   const handleShare = async (e: React.MouseEvent) => {

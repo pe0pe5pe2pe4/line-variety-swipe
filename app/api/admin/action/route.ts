@@ -12,6 +12,9 @@ const RUN_JOBS = new Set([
   'ingest-wikipedia',
   'backfill-genre',
   'dedupe',
+  'backfill-yt-views',
+  'grow-discovery',
+  'find-previews',
 ]);
 
 export async function POST(request: Request) {
@@ -32,6 +35,32 @@ export async function POST(request: Request) {
       const { error } = await supabase.from('contents').update({ thumbnail_url: value }).eq('id', id);
       if (error) return NextResponse.json({ error }, { status: 500 });
       return NextResponse.json({ success: true });
+    }
+
+    // 人力キュレーション判定を保存。
+    // good → curated=true + quality_score=1（推薦で強ブースト・コールドスタート先頭へ）
+    // bad  → curated=false + quality_score=0.1（品質フィルタ(<0.3)で表示対象から外れる）
+    if (type === 'curate') {
+      const id = body.content_id as string;
+      const verdict = body.verdict as string;
+      if (!id || (verdict !== 'good' && verdict !== 'bad')) {
+        return NextResponse.json({ error: 'content_id and verdict(good|bad) required' }, { status: 400 });
+      }
+      const payload =
+        verdict === 'good'
+          ? { curated: true, quality_score: 1 }
+          : { curated: false, quality_score: 0.1 };
+      const { error } = await supabase.from('contents').update(payload).eq('id', id);
+      if (error) {
+        return NextResponse.json(
+          {
+            error: String(error.message ?? error),
+            hint: '先に SQL を実行: ALTER TABLE contents ADD COLUMN IF NOT EXISTS curated boolean;',
+          },
+          { status: 500 }
+        );
+      }
+      return NextResponse.json({ success: true, verdict });
     }
 
     // ingest/enrich 系を手動実行（CRON_SECRET を付けて内部エンドポイントを叩く）

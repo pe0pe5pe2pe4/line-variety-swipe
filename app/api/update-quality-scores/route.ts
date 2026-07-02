@@ -12,7 +12,13 @@ const DAY = 24 * 60 * 60 * 1000;
 const PAGE = 500;
 const DEADLINE_MS = 22000;
 
-type Row = { id: string; thumbnail_url: string | null; description: string | null; created_at: string | null };
+type Row = {
+  id: string;
+  thumbnail_url: string | null;
+  description: string | null;
+  created_at: string | null;
+  curated?: boolean | null;
+};
 
 export async function GET(request: Request) {
   const authHeader = request.headers.get('authorization');
@@ -40,16 +46,29 @@ export async function GET(request: Request) {
   let done = false;
 
   while (Date.now() - started < DEADLINE_MS) {
-    const { data, error } = await supabase
-      .from('contents')
-      .select('id, thumbnail_url, description, created_at')
-      .range(offset, offset + PAGE - 1);
-    if (error) return NextResponse.json({ error }, { status: 500 });
-    const rows = (data ?? []) as Row[];
+    // curated 列が未作成のDBでも動くよう、失敗したら curated 抜きで再取得
+    let rows: Row[] = [];
+    {
+      const res = await supabase
+        .from('contents')
+        .select('id, thumbnail_url, description, created_at, curated')
+        .range(offset, offset + PAGE - 1);
+      if (!res.error) rows = (res.data ?? []) as Row[];
+      else {
+        const res2 = await supabase
+          .from('contents')
+          .select('id, thumbnail_url, description, created_at')
+          .range(offset, offset + PAGE - 1);
+        if (res2.error) return NextResponse.json({ error: res2.error }, { status: 500 });
+        rows = (res2.data ?? []) as Row[];
+      }
+    }
     if (rows.length === 0) { done = true; break; }
 
     await Promise.all(
       rows.map(async (r) => {
+        // 人力キュレーション済みは上書きしない（目利きの判定が最優先）
+        if (r.curated === true || r.curated === false) return;
         const t = total.get(r.id) ?? 0;
         const likeRate = t > 0 ? (right.get(r.id) ?? 0) / t : 0.5;
         const hasImage = hasValidThumbnail(r.thumbnail_url) ? 1 : 0;

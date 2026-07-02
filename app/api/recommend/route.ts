@@ -77,6 +77,21 @@ const YT_SWEET_MIN = 20_000;
 const YT_SWEET_MAX = 800_000;
 const YT_SWEET_TARGET = 120_000;
 
+// 「隠れた実力派」＝登録者数の割に再生されている（面白さが数字で証明された無名）。
+// 再生数÷登録者数のギャップを発掘シグナルとして使う。
+const GEM_RATIO_MIN = 3;      // この倍率以上でスコア加点
+const GEM_BADGE_RATIO = 5;    // この倍率以上でカードに💎バッジ
+const GEM_MAX_SUBS = 200_000; // 登録者がこれを超えたら「無名」扱いしない
+
+function hiddenGemRatio(c: Content): number {
+  const v = c.yt_view_count;
+  const s = c.yt_subscriber_count;
+  if (typeof v !== 'number' || v <= 0) return 0;
+  if (typeof s !== 'number' || s <= 0) return 0; // 未取得(-1含む)は判定しない
+  if (s > GEM_MAX_SUBS) return 0;
+  return v / s;
+}
+
 function topKey(weights: Record<string, number>): string | undefined {
   const entries = Object.entries(weights);
   if (entries.length === 0) return undefined;
@@ -138,6 +153,10 @@ function scoreWithProfile(c: Content, p: Profile): number {
     if (v >= YT_SWEET_MIN && v <= YT_SWEET_MAX) score += 2;
     else if (v > YT_SWEET_MAX * 6) score -= 1; // 数百万超の有名すぎは少し下げる
   }
+  // 人力キュレーションで「面白い」判定済みは強く優先（目利きをアルゴリズムに注入）
+  if (c.curated === true) score += 4;
+  // 登録者の割に再生されている＝隠れた実力派を発掘ブースト
+  if (hiddenGemRatio(c) >= GEM_RATIO_MIN) score += 1.5;
   return score;
 }
 
@@ -159,7 +178,11 @@ function freshnessBonus(createdAt?: string): number {
 function freshShuffle(list: Content[], count: number): Content[] {
   const n = Math.max(list.length, 1);
   return list
-    .map((c, i) => ({ c, key: i * 0.7 + Math.random() * n * 0.5 }))
+    .map((c, i) => ({
+      c,
+      // 人力で「面白い」と確認済みのカードは前方へ（初手の質を目利きで担保）
+      key: i * 0.7 + Math.random() * n * 0.5 - (c.curated === true ? n * 0.4 : 0),
+    }))
     .sort((a, b) => a.key - b.key)
     .slice(0, count)
     .map((x) => x.c);
@@ -555,9 +578,12 @@ function dedupeByTitle(list: Content[], excludeTitles: Set<string>): Content[] {
     if (!key) continue;
     // 画像が無い/no_image/placehold はスワイプ候補から完全除外（TASK6）
     if (!hasValidThumbnail(c.thumbnail_url)) continue;
-    if ((c.description ?? '').trim().length < MIN_DESC_LEN) continue;
-    // 品質スコアが低い（0.3未満）コンテンツは表示しない（TASK5）
-    if (typeof c.quality_score === 'number' && c.quality_score < 0.3) continue;
+    // 人力で「面白い」と確認済みのカードは機械的な品質フィルタを通さない
+    if (c.curated !== true) {
+      if ((c.description ?? '').trim().length < MIN_DESC_LEN) continue;
+      // 品質スコアが低い（0.3未満）コンテンツは表示しない（TASK5）
+      if (typeof c.quality_score === 'number' && c.quality_score < 0.3) continue;
+    }
     if (excludeTitles.has(key) || seen.has(key)) continue;
     seen.add(key);
     result.push(c);
@@ -852,11 +878,13 @@ export async function GET(request: Request) {
     return v >= YT_SWEET_MIN && v <= YT_SWEET_MAX;
   };
   const gemRank = (c: Content): number => {
+    if (c.curated === true) return 0;                 // 人力で「面白い」と確認済み（最強の発掘保証）
     const ch = (c.channel_name ?? '').trim();
-    if (ch && likedChannels.has(ch)) return 0;       // 好きなチャンネルの別動画（当たり学習）
-    if (inSweetBand(c)) return 1;                     // 数万〜数十万の「知らないけど面白い」帯
-    if (!profile.topGenre || resolveGenre(c) !== profile.topGenre) return 2; // 別ジャンルのセレンディピティ
-    return 3;
+    if (ch && likedChannels.has(ch)) return 1;        // 好きなチャンネルの別動画（当たり学習）
+    if (hiddenGemRatio(c) >= GEM_RATIO_MIN && inSweetBand(c)) return 2; // 登録者の割にバズってる無名
+    if (inSweetBand(c)) return 3;                     // 数万〜数十万の「知らないけど面白い」帯
+    if (!profile.topGenre || resolveGenre(c) !== profile.topGenre) return 4; // 別ジャンルのセレンディピティ
+    return 5;
   };
   // ミドル帯の中心(目標再生数)に近いほど良い。帯外/未知は最後。
   const bandScore = (c: Content): number => {
@@ -901,6 +929,13 @@ export async function GET(request: Request) {
     else if (gvr) {
       const medal = gvr.rank === 1 ? '🥇' : gvr.rank === 2 ? '🥈' : '🥉';
       rankBadge = `${medal} ${gvr.genre} 視聴${gvr.rank}位`;
+    } else {
+      // 「登録者の割にバズってる」＝このアプリにしか無いフック
+      const ratio = hiddenGemRatio(c);
+      if (ratio >= GEM_BADGE_RATIO) {
+        const x = Math.round(ratio);
+        rankBadge = `💎 登録者の${x >= 100 ? '100倍以上' : `${x}倍`}再生される実力派`;
+      }
     }
     return {
       ...c,

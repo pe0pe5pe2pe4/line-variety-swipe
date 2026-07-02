@@ -30,6 +30,10 @@ export type Content = {
   created_at?: string | null;
   // YouTube実再生数（発掘のミドル帯=数万〜数十万 を選ぶのに使用）
   yt_view_count?: number | null;
+  // チャンネル登録者数。再生数÷登録者数のギャップが大きい＝「隠れた実力派」の発掘シグナル
+  yt_subscriber_count?: number | null;
+  // 人力キュレーション（true=面白い / false=微妙 / null=未判定）。/admin/curate で判定
+  curated?: boolean | null;
   // カードに出す“フック”表示（recommendが付与）
   rank_badge?: string | null;   // 例「🔥 今週の急上昇 #3」「🥇 お笑い 視聴1位」
   views_label?: string | null;  // 例「32万回再生」

@@ -61,11 +61,19 @@ export default function AdminPage() {
     }
   };
 
-  const jobs = ['enrich-contents', 'ingest-youtube', 'ingest-tver', 'ingest-wikipedia', 'backfill-genre', 'dedupe'];
+  const jobs = ['enrich-contents', 'ingest-youtube', 'ingest-tver', 'ingest-wikipedia', 'backfill-genre', 'dedupe', 'backfill-yt-views', 'grow-discovery', 'find-previews'];
 
   return (
     <main style={{ padding: 16, fontFamily: 'system-ui', maxWidth: 900, margin: '0 auto' }}>
       <h1>バラ推し 管理画面</h1>
+      <p style={{ margin: '8px 0 16px' }}>
+        <a
+          href="/admin/curate"
+          style={{ display: 'inline-block', padding: '10px 18px', background: '#f59e0b', color: '#000', borderRadius: 999, fontWeight: 800, textDecoration: 'none' }}
+        >
+          🎯 目利きキュレーション（動画を見て面白い/微妙を判定）
+        </a>
+      </p>
       {!data ? (
         <p>読み込み中...</p>
       ) : (
