@@ -15,6 +15,7 @@ const RUN_JOBS = new Set([
   'backfill-yt-views',
   'grow-discovery',
   'find-previews',
+  'hunt-gems',
 ]);
 
 export async function POST(request: Request) {

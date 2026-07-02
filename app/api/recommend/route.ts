@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { supabase, timed } from '@/lib/supabase';
-import { type Content, hasValidThumbnail } from '@/lib/types';
+import { type Content, hasValidThumbnail, extractYouTubeId } from '@/lib/types';
 import { inferGenre, resolveGenre } from '@/lib/genre';
 import { rateLimit, rateLimited } from '@/lib/rate-limit';
 import { isPremiumActive } from '@/lib/premium';
@@ -914,7 +914,27 @@ export async function GET(request: Request) {
     else if (mi < forYou.length) woven.push(forYou[mi++]);
     else if (gi < gems.length) woven.push(gems[gi++]);
   }
-  const ordered = diversify(woven);
+  let ordered = diversify(woven);
+
+  // ── 初回体験の担保：最初の30秒が生死を分ける ──
+  // スワイプ経験の浅いユーザーの先頭5枚は「その場で動画が再生できる×フックが強い」
+  // カードで固める（画像だけの死んだカードや弱いカードを初手に出さない）。
+  if (rightSwipeCount < 3) {
+    const OPENING = 5;
+    const playable = (c: Content) =>
+      !!(extractYouTubeId(c.youtube_url) ?? extractYouTubeId(c.preview_youtube_url));
+    const hookScore = (c: Content) =>
+      (c.curated === true ? 100 : 0) + // 人力で「面白い」確認済みが最強
+      Math.min(hiddenGemRatio(c), 30) + // 登録者比バズ
+      (inSweetBand(c) ? 5 : 0) +
+      freshnessBonus(c.created_at ?? undefined);
+    const opening = ordered
+      .filter(playable)
+      .sort((a, b) => hookScore(b) - hookScore(a))
+      .slice(0, OPENING);
+    const openingIds = new Set(opening.map((c) => c.id));
+    ordered = [...opening, ...ordered.filter((c) => !openingIds.has(c.id))];
+  }
 
   // ── フック表示：再生回数・今週の急上昇ランキング・カテゴリ別視聴順位 ──
   const [trendingRank, genreViewRank] = await Promise.all([

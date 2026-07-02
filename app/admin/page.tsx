@@ -61,7 +61,7 @@ export default function AdminPage() {
     }
   };
 
-  const jobs = ['enrich-contents', 'ingest-youtube', 'ingest-tver', 'ingest-wikipedia', 'backfill-genre', 'dedupe', 'backfill-yt-views', 'grow-discovery', 'find-previews'];
+  const jobs = ['enrich-contents', 'ingest-youtube', 'ingest-tver', 'ingest-wikipedia', 'backfill-genre', 'dedupe', 'backfill-yt-views', 'grow-discovery', 'find-previews', 'hunt-gems'];
 
   return (
     <main style={{ padding: 16, fontFamily: 'system-ui', maxWidth: 900, margin: '0 auto' }}>
